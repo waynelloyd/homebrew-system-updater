@@ -281,9 +281,18 @@ def update_macos_system_software(auto_yes=False):
         print(result.stdout)
         
         # Install all updates (let macOS handle authentication)
-        command = ['softwareupdate', '-ia']
+        print(f"\n{'='*50}")
+        print("Running: Installing macOS system updates")
+        print(f"Command: softwareupdate -ia")
+        print(f"{'='*50}")
         
-        return run_command(command, "Installing macOS system updates")
+        try:
+            result = subprocess.run(['softwareupdate', '-ia'], check=True, capture_output=False)
+            print("✅ Installing macOS system updates completed successfully")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Installing macOS system updates failed with exit code {e.returncode}")
+            return False
         
     except subprocess.CalledProcessError as e:
         if "No new software available" in e.stdout:
@@ -645,13 +654,13 @@ def update_firmware(auto_yes=False):
     """Update firmware using fwupdmgr (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
-        print("ℹ️  Firmware updates handled by macOS System Preferences, skipping")
-        return True
+        return True  # Skip silently on macOS
     
     # Check if fwupdmgr is installed
     try:
         subprocess.run(['fwupdmgr', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
+        print("  fwupdmgr not found or not installed, skipping firmware updates")
         print("⚠️  fwupdmgr not found or not installed, skipping firmware updates")
         print("   Install with: sudo apt install fwupd (Ubuntu) or sudo dnf install fwupd (Fedora)")
         return True
@@ -863,16 +872,16 @@ def main():
         if update_system_packages(auto_yes):
             success_count += 1
     
-    # Refresh snaps
-    if not args.skip_snap:
+    # Refresh snaps (Linux only)
+    if not args.skip_snap and detect_os() != 'macos':
         total_tasks += 1
         if refresh_snaps():
             success_count += 1
     
-    # Update Flatpaks
-    if not args.skip_flatpak:
+    # Update Flatpaks (Linux only)
+    if not args.skip_flatpak and detect_os() != 'macos':
         total_tasks += 1
-        if update_firmware():
+        if update_flatpaks():
             success_count += 1
     
     # Update pip packages
@@ -887,22 +896,30 @@ def main():
         if update_mac_apps():
             success_count += 1
     
-    # Update firmware
-    if not args.skip_firmware:
+    # Update firmware (Linux only)
+    if not args.skip_firmware and detect_os() != 'macos':
         total_tasks += 1
         if update_firmware(auto_yes):
             success_count += 1
     
-    # Setup docker-compose configuration on first run
-    if not args.skip_docker_pull:
+    # Check if Docker is installed before any Docker operations
+    docker_available = False
+    try:
+        subprocess.run(['docker', '--version'], check=True, capture_output=True)
+        docker_available = True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    
+    # Setup docker-compose configuration on first run (only if Docker available)
+    if not args.skip_docker_pull and docker_available:
         compose_paths = setup_docker_compose_config(auto_yes)
         if compose_paths or load_config().get('docker_compose_enabled', False):
             total_tasks += 1
             if docker_compose_pull(auto_yes):
                 success_count += 1
     
-    # Docker system prune
-    if not args.skip_docker_prune:
+    # Docker system prune (only if Docker available)
+    if not args.skip_docker_prune and docker_available:
         total_tasks += 1
         if docker_system_prune(auto_yes):
             success_count += 1
