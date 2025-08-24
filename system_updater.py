@@ -89,9 +89,22 @@ def find_docker_compose_files():
             except PermissionError:
                 continue
     
-    # Remove duplicates and return as list of parent directories
+    # Remove duplicates and filter out container overlay paths
     unique_dirs = list(set(f.parent for f in compose_files))
-    return sorted(unique_dirs)
+    
+    # Filter out container storage overlay paths (podman/docker internal paths)
+    filtered_dirs = []
+    for dir_path in unique_dirs:
+        path_str = str(dir_path)
+        # Skip container overlay storage paths
+        if '/.local/share/containers/storage/overlay/' in path_str:
+            continue
+        # Skip other temporary/cache paths
+        if any(skip in path_str for skip in ['/tmp/', '/.cache/', '/var/tmp/']):
+            continue
+        filtered_dirs.append(dir_path)
+    
+    return sorted(filtered_dirs)
 
 def setup_docker_compose_config(auto_yes=False):
     """Setup docker-compose configuration on first run"""
@@ -128,28 +141,25 @@ def setup_docker_compose_config(auto_yes=False):
                 compose_files.append(name)
         print(f"  {i}. {path} ({', '.join(compose_files)})")
     
-    if auto_yes:
+    # Always prompt on first setup, regardless of auto-yes mode
+    print(f"\nWould you like to enable docker-compose operations for these locations?")
+    print("Options:")
+    print("  a) Enable all locations")
+    print("  s) Select specific locations")
+    print("  n) Disable docker-compose operations")
+    
+    choice = input("Choice (a/s/n): ").lower().strip()
+    
+    if choice == 'n':
+        selected_paths = []
+    elif choice == 's':
+        selected_paths = []
+        for i, path in enumerate(compose_dirs, 1):
+            enable = input(f"Enable {path}? (y/N): ").lower().startswith('y')
+            if enable:
+                selected_paths.append(path)
+    else:  # 'a' or default
         selected_paths = compose_dirs
-        print(f"🔄 Auto-yes mode: Enabling all {len(selected_paths)} docker-compose locations")
-    else:
-        print(f"\nWould you like to enable docker-compose operations for these locations?")
-        print("Options:")
-        print("  a) Enable all locations")
-        print("  s) Select specific locations")
-        print("  n) Disable docker-compose operations")
-        
-        choice = input("Choice (a/s/n): ").lower().strip()
-        
-        if choice == 'n':
-            selected_paths = []
-        elif choice == 's':
-            selected_paths = []
-            for i, path in enumerate(compose_dirs, 1):
-                enable = input(f"Enable {path}? (y/N): ").lower().startswith('y')
-                if enable:
-                    selected_paths.append(path)
-        else:  # 'a' or default
-            selected_paths = compose_dirs
     
     config['docker_compose_setup_done'] = True
     config['docker_compose_enabled'] = len(selected_paths) > 0
@@ -265,24 +275,19 @@ def update_macos_system_software(auto_yes=False):
                               check=True, capture_output=True, text=True)
         
         if "No new software available" in result.stdout:
-            print("✅ No macOS system updates available")
-            return True
+            return True  # No updates, return silently
         
         print("📋 Available macOS updates:")
         print(result.stdout)
         
-        # Install all updates
-        command = ['sudo', 'softwareupdate', '-ia']
-        if auto_yes:
-            # softwareupdate doesn't have a -y flag, but -i means install
-            pass
+        # Install all updates (let macOS handle authentication)
+        command = ['softwareupdate', '-ia']
         
         return run_command(command, "Installing macOS system updates")
         
     except subprocess.CalledProcessError as e:
         if "No new software available" in e.stdout:
-            print("✅ No macOS system updates available")
-            return True
+            return True  # No updates, return silently
         print(f"❌ Failed to check for macOS updates: {e.returncode}")
         return False
 
@@ -351,38 +356,14 @@ def update_mas_apps(auto_yes=False):
         return True
 
 def update_ruby_gems(auto_yes=False):
-    """Update Ruby gems (system and user)"""
+    """Update Ruby gems (user only)"""
     # Check if gem is installed
     try:
         subprocess.run(['gem', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
     
-    success = True
-    
-    # Update system gems
-    print(f"\n{'='*50}")
-    print("Running: Checking for outdated system Ruby gems")
-    print(f"Command: gem outdated")
-    print(f"{'='*50}")
-    
-    try:
-        result = subprocess.run(['gem', 'outdated'], 
-                              check=True, capture_output=True, text=True)
-        
-        if result.stdout.strip():
-            print("📋 Outdated system Ruby gems:")
-            print(result.stdout)
-            if not run_command(['gem', 'update'], "Updating system Ruby gems"):
-                success = False
-        else:
-            print("✅ No outdated system Ruby gems found")
-        
-    except subprocess.CalledProcessError:
-        print("⚠️  Could not check system Ruby gem updates")
-        success = False
-    
-    # Update user gems
+    # Update user gems only (avoid system permission issues)
     print(f"\n{'='*50}")
     print("Running: Checking for outdated user Ruby gems")
     print(f"Command: gem outdated --user-install")
@@ -395,16 +376,14 @@ def update_ruby_gems(auto_yes=False):
         if result.stdout.strip():
             print("📋 Outdated user Ruby gems:")
             print(result.stdout)
-            if not run_command(['gem', 'update', '--user-install'], "Updating user Ruby gems"):
-                success = False
+            return run_command(['gem', 'update', '--user-install'], "Updating user Ruby gems")
         else:
             print("✅ No outdated user Ruby gems found")
+            return True
         
     except subprocess.CalledProcessError:
         print("⚠️  Could not check user Ruby gem updates")
-        # Don't fail overall if user gems check fails
-    
-    return success
+        return True
 
 def update_npm_packages(auto_yes=False):
     """Update global npm packages"""
@@ -735,7 +714,7 @@ def update_firmware(auto_yes=False):
                 print("STDERR:", e.stderr)
             return False
 
-def docker_compose_pull():
+def docker_compose_pull(auto_yes=False):
     """Pull docker-compose images in configured directories and restart if updates found"""
     config = load_config()
     compose_paths = config.get('docker_compose_paths', [])
@@ -744,9 +723,30 @@ def docker_compose_pull():
         print("ℹ️  No docker-compose directories configured, skipping")
         return True
     
+    # Filter out invalid paths (container overlay paths, etc.)
+    valid_paths = []
+    for path_str in compose_paths:
+        # Skip container overlay storage paths
+        if '/.local/share/containers/storage/overlay/' in path_str:
+            continue
+        # Skip other temporary/cache paths
+        if any(skip in path_str for skip in ['/tmp/', '/.cache/', '/var/tmp/']):
+            continue
+        valid_paths.append(path_str)
+    
+    # Update config to remove invalid paths
+    if len(valid_paths) != len(compose_paths):
+        config['docker_compose_paths'] = valid_paths
+        save_config(config)
+        print(f"🧹 Cleaned up {len(compose_paths) - len(valid_paths)} invalid docker-compose paths")
+    
+    if not valid_paths:
+        print("ℹ️  No valid docker-compose directories configured, skipping")
+        return True
+    
     overall_success = True
     
-    for path_str in compose_paths:
+    for path_str in valid_paths:
         compose_path = Path(path_str)
         
         if not compose_path.exists():
@@ -813,6 +813,12 @@ def docker_compose_pull():
 
 def docker_system_prune(auto_yes=False):
     """Run docker system prune to clean up unused resources"""
+    # Check if docker is installed
+    try:
+        subprocess.run(['docker', '--version'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return True  # Skip silently if not installed
+    
     command = ['docker', 'system', 'prune', '-a']
     if auto_yes:
         command.append('-f')  # Force, don't prompt for confirmation
@@ -821,8 +827,8 @@ def docker_system_prune(auto_yes=False):
 
 def main():
     parser = argparse.ArgumentParser(description='Cross-platform system update script for Linux/macOS with Docker maintenance')
-    parser.add_argument('-y', '--yes', action='store_true', 
-                       help='Automatically answer yes to prompts')
+    parser.add_argument('-i', '--interactive', action='store_true', 
+                       help='Interactive mode - prompt for user input (default is auto-yes)')
     parser.add_argument('--skip-system', action='store_true',
                        help='Skip system package updates')
     parser.add_argument('--skip-snap', action='store_true',
@@ -842,8 +848,11 @@ def main():
     
     args = parser.parse_args()
     
+    # Default to auto-yes unless interactive flag is set
+    auto_yes = not args.interactive
+    
     print("🚀 Starting system update process...")
-    print(f"Auto-yes mode: {'ON' if args.yes else 'OFF'}")
+    print(f"Mode: {'Interactive' if args.interactive else 'Auto-yes'}")
     
     success_count = 0
     total_tasks = 0
@@ -851,7 +860,7 @@ def main():
     # Update system packages
     if not args.skip_system:
         total_tasks += 1
-        if update_system_packages(args.yes):
+        if update_system_packages(auto_yes):
             success_count += 1
     
     # Refresh snaps
@@ -863,7 +872,7 @@ def main():
     # Update Flatpaks
     if not args.skip_flatpak:
         total_tasks += 1
-        if update_flatpaks():
+        if update_firmware():
             success_count += 1
     
     # Update pip packages
@@ -881,21 +890,21 @@ def main():
     # Update firmware
     if not args.skip_firmware:
         total_tasks += 1
-        if update_firmware(args.yes):
+        if update_firmware(auto_yes):
             success_count += 1
     
     # Setup docker-compose configuration on first run
     if not args.skip_docker_pull:
-        compose_paths = setup_docker_compose_config(args.yes)
+        compose_paths = setup_docker_compose_config(auto_yes)
         if compose_paths or load_config().get('docker_compose_enabled', False):
             total_tasks += 1
-            if docker_compose_pull():
+            if docker_compose_pull(auto_yes):
                 success_count += 1
     
     # Docker system prune
     if not args.skip_docker_prune:
         total_tasks += 1
-        if docker_system_prune(args.yes):
+        if docker_system_prune(auto_yes):
             success_count += 1
     
     # Summary
