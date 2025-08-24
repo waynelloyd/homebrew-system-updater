@@ -82,7 +82,7 @@ A comprehensive cross-platform system update script that handles package managem
 
 ## Docker Operations (All Platforms)
 
-### Docker Compose (~/ganymede directory)
+### Docker Compose (searches ~/ directory and prompts to add compose.yml)
 - **Smart Pull**: `docker-compose pull` with update detection
 - **Conditional Restart**: `docker-compose up -d` only if updates found
 - **Update Detection**: Scans pull output for actual image updates
@@ -258,7 +258,7 @@ Tasks completed successfully: 8/8
 - **Python 3.6+**
 - **sudo privileges** (for system package updates)
 - **Docker** (optional, for Docker operations)
-- **~/ganymede directory with docker-compose.yml** (optional, for Docker compose operations)
+- **Searches ~/ directory for compose.yml** (optional, for Docker compose operations)
 
 ## License
 
