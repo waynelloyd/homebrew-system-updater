@@ -9,6 +9,7 @@ import sys
 import os
 import argparse
 import platform
+import json
 from pathlib import Path
 
 def run_command(command, description, auto_yes=False):
@@ -33,6 +34,134 @@ def run_command(command, description, auto_yes=False):
     except FileNotFoundError:
         print(f"❌ Command not found: {command[0]}")
         return False
+
+def get_config_file():
+    """Get the path to the configuration file"""
+    config_dir = Path.home() / '.config' / 'system-updater'
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / 'config.json'
+
+def load_config():
+    """Load configuration from file"""
+    config_file = get_config_file()
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+def save_config(config):
+    """Save configuration to file"""
+    config_file = get_config_file()
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except IOError:
+        print(f"⚠️  Could not save config to {config_file}")
+        return False
+
+def find_docker_compose_files():
+    """Find docker-compose files in user's home directory"""
+    home = Path.home()
+    compose_files = []
+    
+    # Common compose file names
+    compose_names = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']
+    
+    # Search in home directory and common subdirectories
+    search_paths = [
+        home,
+        home / 'docker',
+        home / 'projects',
+        home / 'dev',
+        home / 'development',
+    ]
+    
+    # Add any directories that contain docker-compose files
+    for search_path in search_paths:
+        if search_path.exists() and search_path.is_dir():
+            try:
+                for compose_name in compose_names:
+                    compose_files.extend(search_path.glob(f'**/{compose_name}'))
+            except PermissionError:
+                continue
+    
+    # Remove duplicates and return as list of parent directories
+    unique_dirs = list(set(f.parent for f in compose_files))
+    return sorted(unique_dirs)
+
+def setup_docker_compose_config(auto_yes=False):
+    """Setup docker-compose configuration on first run"""
+    config = load_config()
+    
+    if 'docker_compose_setup_done' in config:
+        return config.get('docker_compose_paths', [])
+    
+    print(f"\n{'='*60}")
+    print("🐳 DOCKER-COMPOSE SETUP")
+    print(f"{'='*60}")
+    print("Searching for docker-compose files in your home directory...")
+    
+    compose_dirs = find_docker_compose_files()
+    
+    if not compose_dirs:
+        print("ℹ️  No docker-compose files found in common locations")
+        if not auto_yes:
+            enable_docker = input("Would you like to enable Docker operations anyway? (y/N): ").lower().startswith('y')
+        else:
+            enable_docker = False
+        
+        config['docker_compose_setup_done'] = True
+        config['docker_compose_enabled'] = enable_docker
+        config['docker_compose_paths'] = []
+        save_config(config)
+        return []
+    
+    print(f"\n📋 Found docker-compose files in {len(compose_dirs)} location(s):")
+    for i, path in enumerate(compose_dirs, 1):
+        compose_files = []
+        for name in ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']:
+            if (path / name).exists():
+                compose_files.append(name)
+        print(f"  {i}. {path} ({', '.join(compose_files)})")
+    
+    if auto_yes:
+        selected_paths = compose_dirs
+        print(f"🔄 Auto-yes mode: Enabling all {len(selected_paths)} docker-compose locations")
+    else:
+        print(f"\nWould you like to enable docker-compose operations for these locations?")
+        print("Options:")
+        print("  a) Enable all locations")
+        print("  s) Select specific locations")
+        print("  n) Disable docker-compose operations")
+        
+        choice = input("Choice (a/s/n): ").lower().strip()
+        
+        if choice == 'n':
+            selected_paths = []
+        elif choice == 's':
+            selected_paths = []
+            for i, path in enumerate(compose_dirs, 1):
+                enable = input(f"Enable {path}? (y/N): ").lower().startswith('y')
+                if enable:
+                    selected_paths.append(path)
+        else:  # 'a' or default
+            selected_paths = compose_dirs
+    
+    config['docker_compose_setup_done'] = True
+    config['docker_compose_enabled'] = len(selected_paths) > 0
+    config['docker_compose_paths'] = [str(p) for p in selected_paths]
+    save_config(config)
+    
+    if selected_paths:
+        print(f"✅ Docker-compose operations enabled for {len(selected_paths)} location(s)")
+    else:
+        print("ℹ️  Docker-compose operations disabled")
+    
+    return selected_paths
 
 def detect_os():
     """Detect the operating system"""
@@ -555,64 +684,80 @@ def update_firmware(auto_yes=False):
             return False
 
 def docker_compose_pull():
-    """Pull docker-compose images in ~/ganymede directory and restart if updates found"""
-    ganymede_path = Path.home() / 'ganymede'
+    """Pull docker-compose images in configured directories and restart if updates found"""
+    config = load_config()
+    compose_paths = config.get('docker_compose_paths', [])
     
-    if not ganymede_path.exists():
-        print(f"❌ Directory {ganymede_path} does not exist")
-        return False
+    if not compose_paths:
+        print("ℹ️  No docker-compose directories configured, skipping")
+        return True
     
-    if not (ganymede_path / 'docker-compose.yml').exists() and not (ganymede_path / 'docker-compose.yaml').exists():
-        print(f"❌ No docker-compose.yml/yaml found in {ganymede_path}")
-        return False
+    overall_success = True
     
-    # Change to ganymede directory and run docker-compose pull
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(ganymede_path)
+    for path_str in compose_paths:
+        compose_path = Path(path_str)
         
-        # Run docker-compose pull and capture output to detect updates
-        print(f"\n{'='*50}")
-        print("Running: Pulling docker-compose images")
-        print(f"Command: docker-compose pull")
-        print(f"{'='*50}")
+        if not compose_path.exists():
+            print(f"⚠️  Directory {compose_path} no longer exists, skipping")
+            continue
         
+        # Find the compose file in this directory
+        compose_file = None
+        for name in ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']:
+            if (compose_path / name).exists():
+                compose_file = name
+                break
+        
+        if not compose_file:
+            print(f"⚠️  No compose file found in {compose_path}, skipping")
+            continue
+        
+        # Change to compose directory and run docker-compose pull
+        original_cwd = os.getcwd()
         try:
-            result = subprocess.run(['docker-compose', 'pull'], 
-                                  check=True, capture_output=True, text=True)
+            os.chdir(compose_path)
             
-            # Check if any images were actually pulled (updated)
-            output = result.stdout + result.stderr
-            updates_found = any(keyword in output.lower() for keyword in [
-                'pulling', 'downloaded', 'pull complete', 'status: downloaded newer image'
-            ])
+            print(f"\n{'='*50}")
+            print(f"Running: Pulling docker-compose images in {compose_path}")
+            print(f"Command: docker-compose pull")
+            print(f"{'='*50}")
             
-            print(output)
-            print("✅ Docker-compose pull completed successfully")
-            
-            if updates_found:
-                print("🔄 Updates detected, restarting containers...")
-                restart_result = subprocess.run(['docker-compose', 'up', '-d'], 
-                                              check=True, capture_output=False)
-                print("✅ Containers restarted successfully")
-            else:
-                print("ℹ️  No updates found, containers not restarted")
-            
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Docker-compose pull failed with exit code {e.returncode}")
-            if e.stdout:
-                print("STDOUT:", e.stdout)
-            if e.stderr:
-                print("STDERR:", e.stderr)
-            return False
-        except FileNotFoundError:
-            print("❌ docker-compose command not found")
-            return False
-            
-    finally:
-        os.chdir(original_cwd)
+            try:
+                result = subprocess.run(['docker-compose', 'pull'], 
+                                      check=True, capture_output=True, text=True)
+                
+                # Check if any images were actually pulled (updated)
+                output = result.stdout + result.stderr
+                updates_found = any(keyword in output.lower() for keyword in [
+                    'pulling', 'downloaded', 'pull complete', 'status: downloaded newer image'
+                ])
+                
+                print(output)
+                print(f"✅ Docker-compose pull completed successfully in {compose_path}")
+                
+                if updates_found:
+                    print("🔄 Updates detected, restarting containers...")
+                    restart_result = subprocess.run(['docker-compose', 'up', '-d'], 
+                                                  check=True, capture_output=False)
+                    print("✅ Containers restarted successfully")
+                else:
+                    print("ℹ️  No updates found, containers not restarted")
+                
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Docker-compose pull failed in {compose_path} with exit code {e.returncode}")
+                if e.stdout:
+                    print("STDOUT:", e.stdout)
+                if e.stderr:
+                    print("STDERR:", e.stderr)
+                overall_success = False
+            except FileNotFoundError:
+                print("❌ docker-compose command not found")
+                overall_success = False
+                
+        finally:
+            os.chdir(original_cwd)
+    
+    return overall_success
 
 def docker_system_prune(auto_yes=False):
     """Run docker system prune to clean up unused resources"""
@@ -687,11 +832,13 @@ def main():
         if update_firmware(args.yes):
             success_count += 1
     
-    # Docker-compose pull
+    # Setup docker-compose configuration on first run
     if not args.skip_docker_pull:
-        total_tasks += 1
-        if docker_compose_pull():
-            success_count += 1
+        compose_paths = setup_docker_compose_config(args.yes)
+        if compose_paths or load_config().get('docker_compose_enabled', False):
+            total_tasks += 1
+            if docker_compose_pull():
+                success_count += 1
     
     # Docker system prune
     if not args.skip_docker_prune:

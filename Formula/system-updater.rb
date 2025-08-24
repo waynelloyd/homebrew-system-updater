@@ -1,8 +1,8 @@
 class SystemUpdater < Formula
   desc "Cross-platform system update script for Linux and macOS"
-  homepage "https://github.com/waynelloyd/system_updater"
-  url "https://github.com/waynelloyd/system_updater/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "b011efcbf830315d629ac337822ce38c477db9ac52ca9a2de45c6917f3bd6d09"
+  homepage "https://github.com/waynelloyd/homebrew-system-updater"
+  url "https://github.com/waynelloyd/homebrew-system-updater/archive/refs/tags/v1.1.0.tar.gz"
+  sha256 "REPLACE_WITH_ACTUAL_SHA256_FROM_STEP_3"
   license "MIT"
 
   depends_on "python@3.11"
