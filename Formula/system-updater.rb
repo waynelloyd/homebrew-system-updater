@@ -8,17 +8,8 @@ class SystemUpdater < Formula
   depends_on "python@3.11"
 
   def install
-    # Install the actual Python script
-    libexec.install "system_updater.py"
-    
-    # Create a wrapper script to ensure proper Python execution
-    (bin/"system-updater").write <<~EOS
-      #!/bin/bash
-      exec "#{Formula["python@3.11"].opt_bin}/python3" "#{libexec}/system_updater.py" "$@"
-    EOS
-    
-    # Make it executable
-    chmod 0755, bin/"system-updater"
+    # Install the Python script directly as executable
+    bin.install "system_updater.py" => "system-updater"
     
     # Install documentation
     doc.install "README.md"
