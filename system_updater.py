@@ -429,27 +429,11 @@ def update_npm_packages(auto_yes=False):
         else:
             success = False
     
-    # Update user packages (check if package.json exists in current directory or user has local packages)
+    # Update user packages (check if package.json exists in current directory)
     import os
-    home_dir = os.path.expanduser("~")
     
-    # Check common locations for user npm packages
-    user_package_locations = [
-        os.path.join(home_dir, "package.json"),
-        os.path.join(home_dir, "node_modules"),
-        os.getcwd()  # Current directory
-    ]
-    
-    has_local_packages = False
-    for location in user_package_locations:
-        if location == os.getcwd():
-            # Check if current directory has package.json
-            if os.path.exists(os.path.join(location, "package.json")):
-                has_local_packages = True
-                break
-        elif os.path.exists(location):
-            has_local_packages = True
-            break
+    # Only check current directory for package.json (most common use case)
+    has_local_packages = os.path.exists("package.json")
     
     if has_local_packages:
         print(f"\n{'='*50}")
@@ -741,7 +725,7 @@ def update_firmware(auto_yes=False):
         print(result.stdout)
         
         # Apply firmware updates
-        command = ['fwupdmgr', 'update']
+        command = ['sudo', 'fwupdmgr', 'update']
         if auto_yes:
             command.append('--assume-yes')
         
