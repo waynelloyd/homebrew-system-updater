@@ -681,15 +681,12 @@ def update_mac_apps():
     """Update Mac applications using MacUpdater"""
     os_type = detect_os()
     if os_type != 'macos':
-        print("ℹ️  MacUpdater only available on macOS, skipping")
-        return True
+        return True  # Skip silently on non-macOS
     
     macupdater_path = '/Applications/MacUpdater.app/Contents/Resources/macupdater_client'
     
     if not os.path.exists(macupdater_path):
-        print("⚠️  MacUpdater not found, skipping Mac app updates")
-        print("   Install MacUpdater from: https://www.corecode.io/macupdater/")
-        return True
+        return True  # Skip silently if MacUpdater not installed
     
     # Scan for updates
     if not run_command([macupdater_path, 'scan'], "Scanning for Mac app updates"):
@@ -894,8 +891,8 @@ def main():
                        help='Skip Flatpak updates (Linux only)')
     parser.add_argument('--skip-pip', action='store_true',
                        help='Skip pip package updates')
-    parser.add_argument('--skip-mac-apps', action='store_true',
-                       help='Skip Mac application updates (macOS only)')
+    parser.add_argument('--macupdater', action='store_true',
+                       help='Enable MacUpdater for Mac application updates (macOS only)')
     parser.add_argument('--skip-firmware', action='store_true',
                        help='Skip firmware updates (Linux only)')
     parser.add_argument('--skip-docker-pull', action='store_true',
@@ -938,8 +935,8 @@ def main():
         if update_pip_packages():
             success_count += 1
     
-    # Update Mac applications
-    if not args.skip_mac_apps:
+    # Update Mac applications (only if --macupdater flag is set)
+    if args.macupdater:
         total_tasks += 1
         if update_mac_apps():
             success_count += 1

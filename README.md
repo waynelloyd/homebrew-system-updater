@@ -1,6 +1,6 @@
 # System Updater Script
 
-A comprehensive cross-platform system update script that handles package management, service restarts, and Docker maintenance across Linux and macOS systems.
+A comprehensive cross-platform system update script that handles package management, service restarts, and Docker maintenance across Linux and macOS systems. Features auto-yes by default with optional interactive mode and granular control over update operations.
 
 ## Features
 
@@ -70,12 +70,12 @@ A comprehensive cross-platform system update script that handles package managem
 
 #### App Stores & Applications
 - **Mac App Store**: `mas outdated && mas upgrade` (via mas CLI)
-- **MacUpdater**: Scan and update Mac applications
+- **MacUpdater**: Scan and update Mac applications (opt-in with `--macupdater` flag)
 
 #### Developer Tools
-- **Ruby Gems**: `gem outdated && gem update`
-- **npm**: `npm outdated -g && npm update -g` (global packages)
-- **pip3**: Updates outdated Python packages
+- **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
+- **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
+- **pip3**: System and user Python packages with separate handling
 - **Docker**: Compose pull/restart + system prune
 
 ---
@@ -103,7 +103,7 @@ brew tap waynelloyd/system-updater
 brew install system-updater
 
 # Run it
-system-updater -y
+system-updater
 ```
 
 ### Option 2: Direct Install Script
@@ -148,49 +148,51 @@ brew install mas  # Mac App Store CLI
 
 ### Basic Usage
 ```bash
-# Run all updates with auto-confirmation
-python3 system_updater.py -y
+# Run all updates (auto-yes is default)
+system-updater
 
 # Run with manual confirmation prompts
-python3 system_updater.py
+system-updater -i
+# or
+system-updater --interactive
 ```
 
 ### Skip Specific Operations
 ```bash
 # Skip system package updates
-python3 system_updater.py --skip-system
+system-updater --skip-system
 
 # Skip snap packages (Linux)
-python3 system_updater.py --skip-snap
+system-updater --skip-snap
 
 # Skip Flatpak updates (Linux)
-python3 system_updater.py --skip-flatpak
+system-updater --skip-flatpak
 
 # Skip firmware updates (Linux)
-python3 system_updater.py --skip-firmware
+system-updater --skip-firmware
 
 # Skip pip package updates
-python3 system_updater.py --skip-pip
+system-updater --skip-pip
 
-# Skip Mac App Store updates (macOS)
-python3 system_updater.py --skip-mac-apps
+# Enable MacUpdater (opt-in only)
+system-updater --macupdater
 
 # Skip Docker operations
-python3 system_updater.py --skip-docker-pull --skip-docker-prune
+system-updater --skip-docker-pull --skip-docker-prune
 ```
 
 ### Command Line Options
 ```bash
-python3 system_updater.py --help
+system-updater --help
 ```
 
 **Available Options:**
-- `-y, --yes` - Automatically answer yes to prompts
+- `-i, --interactive` - Interactive mode with prompts (default is auto-yes)
 - `--skip-system` - Skip system package updates
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
-- `--skip-mac-apps` - Skip Mac application updates (macOS only)
+- `--macupdater` - Enable MacUpdater for Mac applications (macOS only, opt-in)
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
 - `--skip-docker-prune` - Skip docker system prune
@@ -199,20 +201,23 @@ python3 system_updater.py --help
 
 ### Complete System Update
 ```bash
-# Update everything with auto-confirmation
-python3 system_updater.py -y
+# Update everything (auto-yes by default)
+system-updater
+
+# Update everything including MacUpdater
+system-updater --macupdater
 ```
 
 ### Development Environment Update
 ```bash
 # Update only development tools
-python3 system_updater.py --skip-system --skip-firmware -y
+system-updater --skip-system --skip-firmware
 ```
 
 ### Server Maintenance
 ```bash
 # Update system packages and Docker, skip desktop apps
-python3 system_updater.py --skip-snap --skip-flatpak --skip-mac-apps -y
+system-updater --skip-snap --skip-flatpak
 ```
 
 ## Safety Features
@@ -227,7 +232,7 @@ python3 system_updater.py --skip-snap --skip-flatpak --skip-mac-apps -y
 
 ```
 🚀 Starting system update process...
-Auto-yes mode: ON
+Mode: Auto-yes
 Detected OS: ubuntu
 
 ==================================================
