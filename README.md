@@ -92,7 +92,38 @@ A comprehensive cross-platform system update script that handles package managem
 
 ---
 
-## Installation Requirements
+## Installation
+
+### Option 1: Homebrew (macOS/Linux)
+```bash
+# Add the tap
+brew tap YOUR_USERNAME/YOUR_REPO_NAME
+
+# Install the package
+brew install system-updater
+
+# Run it
+system-updater -y
+```
+
+### Option 2: Direct Install Script
+```bash
+# System-wide install (requires sudo)
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/install.sh | sudo bash
+
+# User install (no sudo required)
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/install.sh | bash
+```
+
+### Option 3: Manual Install
+```bash
+# Download and make executable
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/system_updater.py -o system-updater
+chmod +x system-updater
+sudo mv system-updater /usr/local/bin/
+```
+
+## System Requirements
 
 ### Linux
 ```bash
