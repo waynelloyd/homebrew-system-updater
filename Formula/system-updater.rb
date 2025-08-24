@@ -1,7 +1,7 @@
 class SystemUpdater < Formula
   desc "Cross-platform system update script for Linux and macOS"
-  homepage "https://github.com/YOUR_USERNAME/YOUR_REPO_NAME"
-  url "https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/waynelloyd/system_updater"
+  url "https://github.com/waynelloyd/system_updater/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "b011efcbf830315d629ac337822ce38c477db9ac52ca9a2de45c6917f3bd6d09"
   license "MIT"
 
