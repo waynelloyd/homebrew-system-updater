@@ -265,39 +265,26 @@ def update_macos_packages(auto_yes=False):
 def update_macos_system_software(auto_yes=False):
     """Update macOS system software using softwareupdate"""
     print(f"\n{'='*50}")
-    print("Running: Checking for macOS system updates")
-    print(f"Command: softwareupdate -l")
+    print("Running: Installing macOS system updates")
+    print(f"Command: softwareupdate -ia")
     print(f"{'='*50}")
     
     try:
-        # Check for available updates
-        result = subprocess.run(['softwareupdate', '-l'], 
+        # Install all updates (softwareupdate -ia checks and installs)
+        result = subprocess.run(['softwareupdate', '-ia'], 
                               check=True, capture_output=True, text=True)
         
-        if "No new software available" in result.stdout:
-            return True  # No updates, return silently
+        # Only print success if updates were actually installed
+        if "No new software available" not in result.stdout and result.stdout.strip():
+            print("✅ macOS system updates installed successfully")
         
-        print("📋 Available macOS updates:")
-        print(result.stdout)
-        
-        # Install all updates (let macOS handle authentication)
-        print(f"\n{'='*50}")
-        print("Running: Installing macOS system updates")
-        print(f"Command: softwareupdate -ia")
-        print(f"{'='*50}")
-        
-        try:
-            result = subprocess.run(['softwareupdate', '-ia'], check=True, capture_output=False)
-            print("✅ Installing macOS system updates completed successfully")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Installing macOS system updates failed with exit code {e.returncode}")
-            return False
+        return True
         
     except subprocess.CalledProcessError as e:
-        if "No new software available" in e.stdout:
+        # Check if it's just "no updates available"
+        if e.stdout and "No new software available" in e.stdout:
             return True  # No updates, return silently
-        print(f"❌ Failed to check for macOS updates: {e.returncode}")
+        print(f"❌ Installing macOS system updates failed with exit code {e.returncode}")
         return False
 
 def update_homebrew_packages(auto_yes=False):
@@ -372,6 +359,15 @@ def update_ruby_gems(auto_yes=False):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
     
+    # Check if user has any gems installed first
+    try:
+        list_result = subprocess.run(['gem', 'list', '--user-install'], 
+                                   check=True, capture_output=True, text=True)
+        if not list_result.stdout.strip() or "no gems" in list_result.stdout.lower():
+            return True  # No user gems installed, skip silently
+    except subprocess.CalledProcessError:
+        return True  # Can't check, skip silently
+    
     # Update user gems only (avoid system permission issues)
     print(f"\n{'='*50}")
     print("Running: Checking for outdated user Ruby gems")
@@ -391,19 +387,21 @@ def update_ruby_gems(auto_yes=False):
             return True
         
     except subprocess.CalledProcessError:
-        print("⚠️  Could not check user Ruby gem updates")
-        return True
+        return True  # Skip silently if command fails
 
 def update_npm_packages(auto_yes=False):
-    """Update global npm packages"""
+    """Update global and user npm packages"""
     # Check if npm is installed
     try:
         subprocess.run(['npm', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
     
+    success = True
+    
+    # Update global packages
     print(f"\n{'='*50}")
-    print("Running: Checking for outdated npm packages")
+    print("Running: Checking for outdated global npm packages")
     print(f"Command: npm outdated -g")
     print(f"{'='*50}")
     
@@ -411,28 +409,78 @@ def update_npm_packages(auto_yes=False):
         result = subprocess.run(['npm', 'outdated', '-g'], 
                               check=True, capture_output=True, text=True)
         
-        if not result.stdout.strip():
+        if result.stdout.strip():
+            print("📋 Outdated global npm packages:")
+            print(result.stdout)
+            if not run_command(['npm', 'update', '-g'], "Updating global npm packages"):
+                success = False
+        else:
             print("✅ No outdated global npm packages found")
-            return True
-        
-        print("📋 Outdated global npm packages:")
-        print(result.stdout)
-        
-        # Update all global packages
-        return run_command(['npm', 'update', '-g'], "Updating global npm packages")
         
     except subprocess.CalledProcessError as e:
         if e.returncode == 1:  # npm outdated returns 1 when there are outdated packages
             if e.stdout.strip():
                 print("📋 Outdated global npm packages:")
                 print(e.stdout)
-                return run_command(['npm', 'update', '-g'], "Updating global npm packages")
+                if not run_command(['npm', 'update', '-g'], "Updating global npm packages"):
+                    success = False
             else:
                 print("✅ No outdated global npm packages found")
-                return True
         else:
-            print("⚠️  Could not check npm package updates")
-            return True
+            success = False
+    
+    # Update user packages (check if package.json exists in current directory or user has local packages)
+    import os
+    home_dir = os.path.expanduser("~")
+    
+    # Check common locations for user npm packages
+    user_package_locations = [
+        os.path.join(home_dir, "package.json"),
+        os.path.join(home_dir, "node_modules"),
+        os.getcwd()  # Current directory
+    ]
+    
+    has_local_packages = False
+    for location in user_package_locations:
+        if location == os.getcwd():
+            # Check if current directory has package.json
+            if os.path.exists(os.path.join(location, "package.json")):
+                has_local_packages = True
+                break
+        elif os.path.exists(location):
+            has_local_packages = True
+            break
+    
+    if has_local_packages:
+        print(f"\n{'='*50}")
+        print("Running: Checking for outdated user npm packages")
+        print(f"Command: npm outdated")
+        print(f"{'='*50}")
+        
+        try:
+            result = subprocess.run(['npm', 'outdated'], 
+                                  check=True, capture_output=True, text=True)
+            
+            if result.stdout.strip():
+                print("📋 Outdated user npm packages:")
+                print(result.stdout)
+                if not run_command(['npm', 'update'], "Updating user npm packages"):
+                    success = False
+            else:
+                print("✅ No outdated user npm packages found")
+            
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:  # npm outdated returns 1 when there are outdated packages
+                if e.stdout.strip():
+                    print("📋 Outdated user npm packages:")
+                    print(e.stdout)
+                    if not run_command(['npm', 'update'], "Updating user npm packages"):
+                        success = False
+                else:
+                    print("✅ No outdated user npm packages found")
+            # Don't fail overall for user package issues
+    
+    return success
 
 def check_fedora_restart_needs(auto_yes=False):
     """Check for services and system restart needs on Fedora/RHEL systems"""
