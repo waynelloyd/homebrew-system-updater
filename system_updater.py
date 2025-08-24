@@ -292,9 +292,7 @@ def update_homebrew_packages(auto_yes=False):
     try:
         subprocess.run(['brew', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  Homebrew not found, skipping brew updates")
-        print("   Install Homebrew from: https://brew.sh/")
-        return True
+        return True  # Skip silently if not installed
     
     success = True
     
@@ -326,9 +324,7 @@ def update_mas_apps(auto_yes=False):
     try:
         subprocess.run(['mas', 'version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  mas (Mac App Store CLI) not found, skipping App Store updates")
-        print("   Install with: brew install mas")
-        return True
+        return True  # Skip silently if not installed
     
     # Check for outdated apps
     print(f"\n{'='*50}")
@@ -355,16 +351,18 @@ def update_mas_apps(auto_yes=False):
         return True
 
 def update_ruby_gems(auto_yes=False):
-    """Update Ruby gems"""
+    """Update Ruby gems (system and user)"""
     # Check if gem is installed
     try:
         subprocess.run(['gem', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  Ruby gems not found, skipping gem updates")
-        return True
+        return True  # Skip silently if not installed
     
+    success = True
+    
+    # Update system gems
     print(f"\n{'='*50}")
-    print("Running: Checking for outdated Ruby gems")
+    print("Running: Checking for outdated system Ruby gems")
     print(f"Command: gem outdated")
     print(f"{'='*50}")
     
@@ -372,19 +370,41 @@ def update_ruby_gems(auto_yes=False):
         result = subprocess.run(['gem', 'outdated'], 
                               check=True, capture_output=True, text=True)
         
-        if not result.stdout.strip():
-            print("✅ No outdated Ruby gems found")
-            return True
-        
-        print("📋 Outdated Ruby gems:")
-        print(result.stdout)
-        
-        # Update all gems
-        return run_command(['gem', 'update'], "Updating Ruby gems")
+        if result.stdout.strip():
+            print("📋 Outdated system Ruby gems:")
+            print(result.stdout)
+            if not run_command(['gem', 'update'], "Updating system Ruby gems"):
+                success = False
+        else:
+            print("✅ No outdated system Ruby gems found")
         
     except subprocess.CalledProcessError:
-        print("⚠️  Could not check Ruby gem updates")
-        return True
+        print("⚠️  Could not check system Ruby gem updates")
+        success = False
+    
+    # Update user gems
+    print(f"\n{'='*50}")
+    print("Running: Checking for outdated user Ruby gems")
+    print(f"Command: gem outdated --user-install")
+    print(f"{'='*50}")
+    
+    try:
+        result = subprocess.run(['gem', 'outdated', '--user-install'], 
+                              check=True, capture_output=True, text=True)
+        
+        if result.stdout.strip():
+            print("📋 Outdated user Ruby gems:")
+            print(result.stdout)
+            if not run_command(['gem', 'update', '--user-install'], "Updating user Ruby gems"):
+                success = False
+        else:
+            print("✅ No outdated user Ruby gems found")
+        
+    except subprocess.CalledProcessError:
+        print("⚠️  Could not check user Ruby gem updates")
+        # Don't fail overall if user gems check fails
+    
+    return success
 
 def update_npm_packages(auto_yes=False):
     """Update global npm packages"""
@@ -392,8 +412,7 @@ def update_npm_packages(auto_yes=False):
     try:
         subprocess.run(['npm', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  npm not found, skipping npm updates")
-        return True
+        return True  # Skip silently if not installed
     
     print(f"\n{'='*50}")
     print("Running: Checking for outdated npm packages")
@@ -433,9 +452,7 @@ def check_fedora_restart_needs(auto_yes=False):
     try:
         subprocess.run(['needs-restarting', '--help'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  needs-restarting command not found, install dnf-utils for restart detection")
-        print("   Install with: sudo dnf install dnf-utils")
-        return True
+        return True  # Skip silently if not installed
     
     print(f"\n{'='*50}")
     print("Running: Checking for restart requirements")
@@ -505,31 +522,26 @@ def refresh_snaps():
     """Refresh snap packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
-        print("ℹ️  Snap not available on macOS, skipping")
-        return True
+        return True  # Skip silently on macOS
     
     # Check if snap is installed
     try:
         subprocess.run(['snap', '--version'], check=True, capture_output=True)
         return run_command(['sudo', 'snap', 'refresh'], "Refreshing snap packages")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  Snap not found or not installed, skipping snap refresh")
-        return True
+        return True  # Skip silently if not installed
 
 def update_flatpaks():
     """Update Flatpak packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
-        print("ℹ️  Flatpak not available on macOS, skipping")
-        return True
+        return True  # Skip silently on macOS
     
     # Check if flatpak is installed
     try:
         subprocess.run(['flatpak', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  Flatpak not found or not installed, skipping flatpak updates")
-        print("   Install with: sudo apt install flatpak (Ubuntu) or sudo dnf install flatpak (Fedora)")
-        return True
+        return True  # Skip silently if not installed
     
     success = True
     
@@ -544,50 +556,90 @@ def update_flatpaks():
     return success
 
 def update_pip_packages():
-    """Update pip packages (primarily for macOS)"""
-    os_type = detect_os()
-    
+    """Update pip packages (system and user)"""
     # Check if pip3 is installed
     try:
         subprocess.run(['pip3', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("⚠️  pip3 not found, skipping pip package updates")
-        return True
+        return True  # Skip silently if not installed
     
+    success = True
+    
+    # Update system pip packages
     print(f"\n{'='*50}")
-    print("Running: Updating pip packages")
-    print(f"Command: pip3 list --outdated --format=columns | awk 'NR>2{{print $1}}' | xargs -n1 pip3 install -U")
+    print("Running: Updating system pip packages")
+    print(f"Command: pip3 list --outdated --format=columns")
     print(f"{'='*50}")
     
     try:
-        # Get outdated packages and upgrade them
+        # Get outdated system packages
         result = subprocess.run(['pip3', 'list', '--outdated', '--format=columns'], 
                               check=True, capture_output=True, text=True)
         
-        if not result.stdout.strip() or len(result.stdout.strip().split('\n')) <= 2:
-            print("ℹ️  No outdated pip packages found")
-            return True
+        if result.stdout.strip() and len(result.stdout.strip().split('\n')) > 2:
+            # Extract package names (skip header lines)
+            lines = result.stdout.strip().split('\n')[2:]  # Skip first 2 header lines
+            packages = [line.split()[0] for line in lines if line.strip()]
+            
+            if packages:
+                print(f"📋 Found {len(packages)} outdated system packages: {', '.join(packages)}")
+                
+                # Upgrade each package
+                for package in packages:
+                    try:
+                        subprocess.run(['pip3', 'install', '-U', package], check=True, capture_output=False)
+                    except subprocess.CalledProcessError:
+                        print(f"⚠️  Failed to update {package}")
+                        success = False
+                
+                print("✅ System pip packages updated")
+            else:
+                print("✅ No outdated system pip packages found")
+        else:
+            print("✅ No outdated system pip packages found")
         
-        # Extract package names (skip header lines)
-        lines = result.stdout.strip().split('\n')[2:]  # Skip first 2 header lines
-        packages = [line.split()[0] for line in lines if line.strip()]
+    except subprocess.CalledProcessError:
+        print("⚠️  Could not check system pip packages")
+        success = False
+    
+    # Update user pip packages
+    print(f"\n{'='*50}")
+    print("Running: Updating user pip packages")
+    print(f"Command: pip3 list --user --outdated --format=columns")
+    print(f"{'='*50}")
+    
+    try:
+        # Get outdated user packages
+        result = subprocess.run(['pip3', 'list', '--user', '--outdated', '--format=columns'], 
+                              check=True, capture_output=True, text=True)
         
-        if not packages:
-            print("ℹ️  No outdated pip packages found")
-            return True
+        if result.stdout.strip() and len(result.stdout.strip().split('\n')) > 2:
+            # Extract package names (skip header lines)
+            lines = result.stdout.strip().split('\n')[2:]  # Skip first 2 header lines
+            packages = [line.split()[0] for line in lines if line.strip()]
+            
+            if packages:
+                print(f"📋 Found {len(packages)} outdated user packages: {', '.join(packages)}")
+                
+                # Upgrade each package
+                for package in packages:
+                    try:
+                        subprocess.run(['pip3', 'install', '--user', '-U', package], check=True, capture_output=False)
+                    except subprocess.CalledProcessError:
+                        print(f"⚠️  Failed to update user package {package}")
+                        # Don't fail overall for user package failures
+                
+                print("✅ User pip packages updated")
+            else:
+                print("✅ No outdated user pip packages found")
+        else:
+            print("✅ No outdated user pip packages found")
         
-        print(f"📋 Found {len(packages)} outdated packages: {', '.join(packages)}")
-        
-        # Upgrade each package
-        for package in packages:
-            subprocess.run(['pip3', 'install', '-U', package], check=True, capture_output=False)
-        
-        print("✅ Pip packages updated successfully")
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Pip package update failed with exit code {e.returncode}")
-        return False
+    except subprocess.CalledProcessError:
+        print("⚠️  Could not check user pip packages")
+        # Don't fail overall if user packages check fails
+    
+    return success
 
 def update_mac_apps():
     """Update Mac applications using MacUpdater"""
