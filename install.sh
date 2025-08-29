@@ -7,7 +7,7 @@ set -e
 
 INSTALL_DIR="/usr/local/bin"
 SCRIPT_NAME="system-updater"
-REPO_URL="https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/system_updater.py"
+REPO_URL="https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/system-updater.py"
 
 echo "🚀 Installing System Updater..."
 
