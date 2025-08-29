@@ -12,6 +12,9 @@ import platform
 import json
 from pathlib import Path
 
+# Define the script version. Remember to update this for each new release.
+__version__ = "1.0.0"
+
 def run_command(command, description, auto_yes=False):
     """Run a command and handle output"""
     print(f"\n{'='*50}")
@@ -865,6 +868,12 @@ def docker_system_prune(auto_yes=False):
 
 def main():
     parser = argparse.ArgumentParser(description='Cross-platform system update script for Linux/macOS with Docker maintenance')
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
+        help="Show program's version number and exit."
+    )
     parser.add_argument('-i', '--interactive', action='store_true', 
                        help='Interactive mode - prompt for user input (default is auto-yes)')
     parser.add_argument('--skip-system', action='store_true',
