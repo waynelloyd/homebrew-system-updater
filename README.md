@@ -128,10 +128,10 @@ sudo mv system-updater /usr/local/bin/
 ### Linux
 ```bash
 # Ubuntu/Debian
-sudo apt install python3 flatpak fwupd dnf-utils
+sudo apt install flatpak fwupd
 
-# Fedora/RHEL
-sudo dnf install python3 flatpak fwupd dnf-utils
+# Fedora/RHEL  
+sudo dnf install flatpak fwupd
 ```
 
 ### macOS

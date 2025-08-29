@@ -468,20 +468,20 @@ def update_npm_packages(auto_yes=False):
 
 def check_fedora_restart_needs(auto_yes=False):
     """Check for services and system restart needs on Fedora/RHEL systems"""
-    # Check if dnf-utils (which provides needs-restarting) is available
+    # Check if dnf is available (should be on all modern Fedora/RHEL systems)
     try:
-        subprocess.run(['needs-restarting', '--help'], check=True, capture_output=True)
+        subprocess.run(['dnf', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return True  # Skip silently if dnf not available
     
     print(f"\n{'='*50}")
     print("Running: Checking for restart requirements")
-    print(f"Command: needs-restarting")
+    print(f"Command: dnf needs-restarting")
     print(f"{'='*50}")
     
     # Check for services that need restarting
     try:
-        services_result = subprocess.run(['needs-restarting', '-s'], 
+        services_result = subprocess.run(['dnf', 'needs-restarting', '-s'], 
                                        check=True, capture_output=True, text=True)
         
         if services_result.stdout.strip():
@@ -507,7 +507,7 @@ def check_fedora_restart_needs(auto_yes=False):
     
     # Check if system reboot is needed
     try:
-        reboot_result = subprocess.run(['needs-restarting', '-r'], 
+        reboot_result = subprocess.run(['dnf', 'needs-restarting', '-r'], 
                                      check=True, capture_output=True, text=True)
         print("✅ System reboot not required")
         

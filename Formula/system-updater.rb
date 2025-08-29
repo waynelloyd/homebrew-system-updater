@@ -5,8 +5,6 @@ class SystemUpdater < Formula
   sha256 "23501f0263620eaeac0a7ac9c37857108256f09ffffd8df698754b3ddb6ada6f"
   license "MIT"
 
-  depends_on "python@3.11"
-
   def install
     # Install the Python script directly as executable
     bin.install "system_updater.py" => "system-updater"
