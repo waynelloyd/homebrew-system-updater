@@ -111,6 +111,7 @@ system-updater
 # System-wide install (requires sudo)
 curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/install.sh | sudo bash
 
+
 # User install (no sudo required)
 curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/install.sh | bash
 ```
