@@ -119,7 +119,7 @@ curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/
 ### Option 3: Manual Install
 ```bash
 # Download and make executable
-curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/system_updater.py -o system-updater
+curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/refs/heads/main/system-updater.py -o system-updater
 chmod +x system-updater
 sudo mv system-updater /usr/local/bin/
 ```
