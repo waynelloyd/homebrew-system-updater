@@ -44,7 +44,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **Smart Restart Detection**: Uses `needs-restarting` to detect:
   - Services requiring restart (`needs-restarting -s`)
   - System reboot requirements (`needs-restarting -r`)
-  - Automatic service restart with user confirmation
+  - **Automatic service restart with user confirmation** (or use `--service-restart` to skip confirmation)
   - System reboot prompt with 10-second countdown
 
 #### Additional Package Managers
@@ -210,6 +210,7 @@ system-updater --help
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
 - `--skip-docker-prune` - Skip docker system prune
+- `--service-restart` - **Fedora/RHEL only**. Automatically restart services detected by `dnf needs-restarting` without confirmation. If not set, you will be prompted to confirm service restarts (y/n).
 
 ## Examples
 

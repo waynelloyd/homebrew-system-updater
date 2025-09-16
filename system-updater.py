@@ -154,8 +154,9 @@ def setup_docker_compose_config(auto_yes=False):
     print("  s) Select specific locations")
     print("  n) Disable docker-compose operations")
     
-    choice = input("Choice (a/s/n): ").lower().strip()
-    
+    choice = input("Choice (a/s/n): ")
+
+
     if choice == 'n':
         selected_paths = []
     elif choice == 's':
@@ -441,7 +442,7 @@ def update_npm_packages(auto_yes=False):
     
     return success
 
-def check_fedora_restart_needs(auto_yes=False):
+def check_fedora_restart_needs(auto_yes=False, service_restart=False):
     """Check for services and system restart needs on Fedora/RHEL systems"""
     # Check if dnf is available
     try:
@@ -467,7 +468,12 @@ def check_fedora_restart_needs(auto_yes=False):
             for service in services:
                 print(f"   - {service}")
 
-            if auto_yes or input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y'):
+            # Prompt for confirmation unless --service-restart is set
+            if service_restart or (auto_yes and service_restart):
+                restart_confirmed = True
+            else:
+                restart_confirmed = input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y')
+            if restart_confirmed:
                 print("🔄 Restarting services...")
                 for service in services:
                     service_name = service.strip()
@@ -478,10 +484,8 @@ def check_fedora_restart_needs(auto_yes=False):
                 print("ℹ️  Services not restarted. You can restart them manually later.")
                 pending_actions.append("Some services on your Fedora/RHEL system were not restarted. You may want to restart them manually.")
         else:
-            # This case is unlikely (exit code 1 but no output), but handle it gracefully.
             print("✅ No services need restarting")
     else:
-        # Another error occurred (e.g., exit code 100)
         print("⚠️  Could not check service restart requirements")
         if services_result.stderr:
             print(f"Error details: {services_result.stderr.strip()}")
@@ -515,7 +519,6 @@ def check_fedora_restart_needs(auto_yes=False):
             else:
                 print("ℹ️  System reboot postponed. Please reboot when convenient.")
     else:
-        # Another error occurred
         print("⚠️  Could not determine if system reboot is needed")
         if reboot_result.stderr:
             print(f"Error details: {reboot_result.stderr.strip()}")
@@ -877,7 +880,9 @@ def main():
                        help='Skip docker-compose pull')
     parser.add_argument('--skip-docker-prune', action='store_true',
                        help='Skip docker system prune')
-    
+    parser.add_argument('--service-restart', action='store_true',
+                   help='Automatically restart services detected by dnf needs-restarting without confirmation')
+
     args = parser.parse_args()
     
     # Default to auto-yes unless interactive flag is set
@@ -922,8 +927,7 @@ def main():
             elif os_type in ['fedora', 'rhel']:
                 if run_command(['sudo', 'dnf', 'upgrade'], f"Updating {os_type.capitalize()} packages", auto_yes):
                     success_count += 1
-                check_fedora_restart_needs(auto_yes)
-
+                check_fedora_restart_needs(auto_yes, service_restart=args.service_restart)
         # Other Linux tasks
         linux_tasks = [
             (refresh_snaps, not args.skip_snap, auto_yes),
