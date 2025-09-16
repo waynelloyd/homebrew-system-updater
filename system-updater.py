@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 # Global list to store pending actions
 pending_actions = []
@@ -213,70 +213,6 @@ def detect_linux_distro():
         return 'rhel'
     
     return 'linux_unknown'
-
-def update_system_packages(auto_yes=False, skip_vim=False, skip_omz=False):
-    """Update system packages based on operating system"""
-    os_type = detect_os()
-    print(f"Detected OS: {os_type}")
-    
-    if os_type == 'macos':
-        return update_macos_packages(auto_yes, skip_vim=skip_vim, skip_omz=skip_omz)
-    elif os_type == 'ubuntu':
-        # Update package lists
-        run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
-        # Upgrade packages
-        run_command(['sudo', 'apt', 'upgrade'], "Upgrading packages", auto_yes)
-    elif os_type == 'fedora':
-        # Update packages
-        run_command(['sudo', 'dnf', 'upgrade'], "Updating Fedora packages", auto_yes)
-        # Check for services that need restarting
-        check_fedora_restart_needs(auto_yes)
-    elif os_type == 'rhel':
-        # Update packages
-        run_command(['sudo', 'yum', 'update'], "Updating RHEL/CentOS packages", auto_yes)
-        # Check for services that need restarting
-        check_fedora_restart_needs(auto_yes)
-    else:
-        print(f"❌ Unsupported OS: {os_type}")
-        return False
-    
-    return True
-
-def update_macos_packages(auto_yes=False, skip_vim=False, skip_omz=False):
-    """Update macOS packages using multiple package managers"""
-    success = True
-    
-    # Update macOS system software first
-    if not update_macos_system_software(auto_yes):
-        success = False
-    
-    # Update Homebrew packages
-    if not update_homebrew_packages(auto_yes):
-        success = False
-    
-    # Update Mac App Store apps
-    if not update_mas_apps(auto_yes):
-        success = False
-    
-    # Update Ruby gems
-    if not update_ruby_gems(auto_yes):
-        success = False
-    
-    # Update npm packages
-    if not update_npm_packages(auto_yes):
-        success = False
-    
-    # Update Vim plugins
-    if not skip_vim:
-        if not update_vim_plugins(auto_yes):
-            success = False
-            
-    # Update Oh My Zsh
-    if not skip_omz:
-        if not update_oh_my_zsh(auto_yes):
-            success = False
-            
-    return success
 
 def update_vim_plugins(auto_yes=False):
     """Update Vim plugins using Vundle"""
@@ -531,7 +467,7 @@ def check_fedora_restart_needs(auto_yes=False):
             for service in services:
                 print(f"   - {service}")
 
-            if input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y'):
+            if auto_yes or input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y'):
                 print("🔄 Restarting services...")
                 for service in services:
                     service_name = service.strip()
@@ -542,8 +478,10 @@ def check_fedora_restart_needs(auto_yes=False):
                 print("ℹ️  Services not restarted. You can restart them manually later.")
                 pending_actions.append("Some services on your Fedora/RHEL system were not restarted. You may want to restart them manually.")
         else:
+            # This case is unlikely (exit code 1 but no output), but handle it gracefully.
             print("✅ No services need restarting")
     else:
+        # Another error occurred (e.g., exit code 100)
         print("⚠️  Could not check service restart requirements")
         if services_result.stderr:
             print(f"Error details: {services_result.stderr.strip()}")
@@ -577,6 +515,7 @@ def check_fedora_restart_needs(auto_yes=False):
             else:
                 print("ℹ️  System reboot postponed. Please reboot when convenient.")
     else:
+        # Another error occurred
         print("⚠️  Could not determine if system reboot is needed")
         if reboot_result.stderr:
             print(f"Error details: {reboot_result.stderr.strip()}")
@@ -919,7 +858,7 @@ def main():
     parser.add_argument('-i', '--interactive', action='store_true', 
                        help='Interactive mode - prompt for user input (default is auto-yes)')
     parser.add_argument('--skip-system', action='store_true',
-                       help='Skip system package updates')
+                       help='Skip system package updates (macOS: Homebrew, MAS, etc.)')
     parser.add_argument('--skip-vim', action='store_true',
                         help='Skip vim plugin updates')
     parser.add_argument('--skip-omz', action='store_true',
@@ -950,64 +889,77 @@ def main():
     success_count = 0
     total_tasks = 0
     
-    # Update system packages
-    if not args.skip_system:
-        total_tasks += 1
-        if update_system_packages(auto_yes, skip_vim=args.skip_vim, skip_omz=args.skip_omz):
-            success_count += 1
-    
-    # Refresh snaps (Linux only)
-    if not args.skip_snap and detect_os() != 'macos':
-        total_tasks += 1
-        if refresh_snaps():
-            success_count += 1
-    
-    # Update Flatpaks (Linux only)
-    if not args.skip_flatpak and detect_os() != 'macos':
-        total_tasks += 1
-        if update_flatpaks():
-            success_count += 1
-    
-    # Update pip packages
-    if not args.skip_pip:
-        total_tasks += 1
-        if update_pip_packages():
-            success_count += 1
-    
-    # Update Mac applications (only if --macupdater flag is set)
-    if args.macupdater:
-        total_tasks += 1
-        if update_mac_apps():
-            success_count += 1
-    
-    # Update firmware (Linux only)
-    if not args.skip_firmware and detect_os() != 'macos':
-        total_tasks += 1
-        if update_firmware(auto_yes):
-            success_count += 1
-    
-    # Check if Docker is installed before any Docker operations
+    os_type = detect_os()
+    print(f"Detected OS: {os_type}")
+
+    if os_type == 'macos':
+        # Define macOS tasks
+        macos_tasks = [
+            (update_macos_system_software, not args.skip_system, auto_yes),
+            (update_homebrew_packages, not args.skip_system, auto_yes),
+            (update_mas_apps, not args.skip_system, auto_yes),
+            (update_ruby_gems, not args.skip_pip, auto_yes),
+            (update_npm_packages, not args.skip_pip, auto_yes),
+            (update_vim_plugins, not args.skip_vim, auto_yes),
+            (update_oh_my_zsh, not args.skip_omz, auto_yes),
+            (update_mac_apps, args.macupdater, auto_yes),
+        ]
+
+        for task, should_run, *task_args in macos_tasks:
+            if should_run:
+                total_tasks += 1
+                if task(*task_args):
+                    success_count += 1
+
+    elif os_type in ['ubuntu', 'fedora', 'rhel']:
+        # System packages
+        if not args.skip_system:
+            total_tasks += 1
+            if os_type == 'ubuntu':
+                run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
+                if run_command(['sudo', 'apt', 'upgrade'], "Upgrading packages", auto_yes):
+                    success_count += 1
+            elif os_type in ['fedora', 'rhel']:
+                if run_command(['sudo', 'dnf', 'upgrade'], f"Updating {os_type.capitalize()} packages", auto_yes):
+                    success_count += 1
+                check_fedora_restart_needs(auto_yes)
+
+        # Other Linux tasks
+        linux_tasks = [
+            (refresh_snaps, not args.skip_snap, auto_yes),
+            (update_flatpaks, not args.skip_flatpak, auto_yes),
+            (update_pip_packages, not args.skip_pip, auto_yes),
+            (update_firmware, not args.skip_firmware, auto_yes),
+        ]
+        for task, should_run, *task_args in linux_tasks:
+            if should_run:
+                total_tasks += 1
+                if task(*task_args):
+                    success_count += 1
+    else:
+        print(f"❌ Unsupported OS: {os_type}")
+
+    # Docker operations (cross-platform)
     docker_available = False
     try:
         subprocess.run(['docker', '--version'], check=True, capture_output=True)
         docker_available = True
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
-    
-    # Setup docker-compose configuration on first run (only if Docker available)
-    if not args.skip_docker_pull and docker_available:
-        compose_paths = setup_docker_compose_config(auto_yes)
-        if compose_paths or load_config().get('docker_compose_enabled', False):
+
+    if docker_available:
+        if not args.skip_docker_pull:
+            compose_paths = setup_docker_compose_config(auto_yes)
+            if compose_paths or load_config().get('docker_compose_enabled', False):
+                total_tasks += 1
+                if docker_compose_pull(auto_yes):
+                    success_count += 1
+        
+        if not args.skip_docker_prune:
             total_tasks += 1
-            if docker_compose_pull(auto_yes):
+            if docker_system_prune(auto_yes):
                 success_count += 1
-    
-    # Docker system prune (only if Docker available)
-    if not args.skip_docker_prune and docker_available:
-        total_tasks += 1
-        if docker_system_prune(auto_yes):
-            success_count += 1
-    
+
     # Pending actions summary
     if pending_actions:
         print(f"\n{'='*50}")
