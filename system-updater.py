@@ -522,7 +522,7 @@ def check_fedora_restart_needs(auto_yes=False):
 
     return True
 
-def refresh_snaps():
+def refresh_snaps(auto_yes=False):
     """Refresh snap packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
@@ -535,7 +535,7 @@ def refresh_snaps():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
 
-def update_flatpaks():
+def update_flatpaks(auto_yes=False):
     """Update Flatpak packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
@@ -559,7 +559,7 @@ def update_flatpaks():
     
     return success
 
-def update_pip_packages():
+def update_pip_packages(auto_yes=False):
     """Update pip packages (system and user)"""
     # Check if pip3 is installed
     try:
@@ -645,7 +645,7 @@ def update_pip_packages():
     
     return success
 
-def update_mac_apps():
+def update_mac_apps(auto_yes=False):
     """Update Mac applications using MacUpdater"""
     os_type = detect_os()
     if os_type != 'macos':
