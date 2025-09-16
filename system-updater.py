@@ -13,7 +13,10 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.0"
+__version__ = "1.0.1"
+
+# Global list to store pending actions
+pending_actions = []
 
 def run_command(command, description, auto_yes=False):
     """Run a command and handle output"""
@@ -211,13 +214,13 @@ def detect_linux_distro():
     
     return 'linux_unknown'
 
-def update_system_packages(auto_yes=False):
+def update_system_packages(auto_yes=False, skip_vim=False, skip_omz=False):
     """Update system packages based on operating system"""
     os_type = detect_os()
     print(f"Detected OS: {os_type}")
     
     if os_type == 'macos':
-        return update_macos_packages(auto_yes)
+        return update_macos_packages(auto_yes, skip_vim=skip_vim, skip_omz=skip_omz)
     elif os_type == 'ubuntu':
         # Update package lists
         run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
@@ -239,7 +242,7 @@ def update_system_packages(auto_yes=False):
     
     return True
 
-def update_macos_packages(auto_yes=False):
+def update_macos_packages(auto_yes=False, skip_vim=False, skip_omz=False):
     """Update macOS packages using multiple package managers"""
     success = True
     
@@ -263,7 +266,36 @@ def update_macos_packages(auto_yes=False):
     if not update_npm_packages(auto_yes):
         success = False
     
+    # Update Vim plugins
+    if not skip_vim:
+        if not update_vim_plugins(auto_yes):
+            success = False
+            
+    # Update Oh My Zsh
+    if not skip_omz:
+        if not update_oh_my_zsh(auto_yes):
+            success = False
+            
     return success
+
+def update_vim_plugins(auto_yes=False):
+    """Update Vim plugins using Vundle"""
+    vundle_path = Path.home() / '.vim' / 'bundle' / 'Vundle.vim'
+    if not vundle_path.exists():
+        return True # Skip silently if Vundle not installed
+        
+    return run_command(['vim', '+PluginUpdate', '+qall'], "Updating Vim plugins")
+
+def update_oh_my_zsh(auto_yes=False):
+    """Update Oh My Zsh framework"""
+    oh_my_zsh_path = Path.home() / '.oh-my-zsh'
+    if not oh_my_zsh_path.exists():
+        return True # Skip silently if not installed
+
+    # omz is a shell function, so we need to run it within a zsh shell
+    # The update process for omz is non-interactive by default.
+    command = ['zsh', '-c', 'source ~/.zshrc && omz update']
+    return run_command(command, "Updating Oh My Zsh")
 
 def update_macos_system_software(auto_yes=False):
     """Update macOS system software using softwareupdate"""
@@ -277,6 +309,10 @@ def update_macos_system_software(auto_yes=False):
         result = subprocess.run(['softwareupdate', '-ia'], 
                               check=True, capture_output=True, text=True)
         
+        # Check if a restart is required
+        if any(phrase in result.stdout for phrase in ["restart", "reboot"]):
+            pending_actions.append("A restart is required to complete the installation of some macOS updates.")
+
         # Only print success if updates were actually installed
         if "No new software available" not in result.stdout and result.stdout.strip():
             print("✅ macOS system updates installed successfully")
@@ -471,74 +507,80 @@ def update_npm_packages(auto_yes=False):
 
 def check_fedora_restart_needs(auto_yes=False):
     """Check for services and system restart needs on Fedora/RHEL systems"""
-    # Check if dnf is available (should be on all modern Fedora/RHEL systems)
+    # Check if dnf is available
     try:
         subprocess.run(['dnf', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if dnf not available
-    
+
     print(f"\n{'='*50}")
     print("Running: Checking for restart requirements")
     print(f"Command: dnf needs-restarting")
     print(f"{'='*50}")
-    
+
     # Check for services that need restarting
-    try:
-        services_result = subprocess.run(['dnf', 'needs-restarting', '-s'], 
-                                       check=True, capture_output=True, text=True)
-        
+    services_result = subprocess.run(['dnf', 'needs-restarting', '-s'],
+                                     capture_output=True, text=True, check=False)
+
+    if services_result.returncode == 0:
+        print("✅ No services need restarting")
+    elif services_result.returncode == 1:
         if services_result.stdout.strip():
             services = services_result.stdout.strip().split('\n')
             print(f"🔄 Found {len(services)} services that need restarting:")
             for service in services:
                 print(f"   - {service}")
-            
-            if auto_yes or input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y'):
+
+            if input("\n🤔 Restart these services automatically? (y/N): ").lower().startswith('y'):
                 print("🔄 Restarting services...")
                 for service in services:
                     service_name = service.strip()
                     if service_name:
-                        run_command(['sudo', 'systemctl', 'restart', service_name], 
+                        run_command(['sudo', 'systemctl', 'restart', service_name],
                                   f"Restarting {service_name}")
             else:
                 print("ℹ️  Services not restarted. You can restart them manually later.")
+                pending_actions.append("Some services on your Fedora/RHEL system were not restarted. You may want to restart them manually.")
         else:
             print("✅ No services need restarting")
-            
-    except subprocess.CalledProcessError:
+    else:
         print("⚠️  Could not check service restart requirements")
-    
+        if services_result.stderr:
+            print(f"Error details: {services_result.stderr.strip()}")
+
     # Check if system reboot is needed
-    try:
-        reboot_result = subprocess.run(['dnf', 'needs-restarting', '-r'], 
-                                     check=True, capture_output=True, text=True)
+    reboot_result = subprocess.run(['dnf', 'needs-restarting', '-r'],
+                                   capture_output=True, text=True, check=False)
+
+    if reboot_result.returncode == 0:
         print("✅ System reboot not required")
-        
-    except subprocess.CalledProcessError as e:
-        if e.returncode == 1:  # Exit code 1 means reboot is needed
-            print("🚨 SYSTEM REBOOT REQUIRED")
-            print("   Some updates require a system restart to take effect")
-            
-            if auto_yes:
-                print("⚠️  Auto-yes mode enabled, but system reboot requires manual confirmation")
-                print("   Please reboot your system when convenient")
-            else:
-                reboot_choice = input("\n🤔 Reboot system now? (y/N): ").lower()
-                if reboot_choice.startswith('y'):
-                    print("🔄 Initiating system reboot in 10 seconds...")
-                    print("   Press Ctrl+C to cancel")
-                    try:
-                        subprocess.run(['sleep', '10'], check=True)
-                        subprocess.run(['sudo', 'reboot'], check=True)
-                    except KeyboardInterrupt:
-                        print("\n❌ Reboot cancelled")
-                    except subprocess.CalledProcessError:
-                        print("❌ Failed to initiate reboot")
-                else:
-                    print("ℹ️  System reboot postponed. Please reboot when convenient.")
+    elif reboot_result.returncode == 1:
+        print("🚨 SYSTEM REBOOT REQUIRED")
+        print("   Some updates require a system restart to take effect")
+        pending_actions.append("A system reboot is required for some updates to take effect on your Fedora/RHEL system.")
+
+        if auto_yes:
+            print("⚠️  Auto-yes mode enabled, but system reboot requires manual confirmation")
+            print("   Please reboot your system when convenient")
         else:
-            print("⚠️  Could not determine if system reboot is needed")
-    
+            reboot_choice = input("\n🤔 Reboot system now? (y/N): ").lower()
+            if reboot_choice.startswith('y'):
+                print("🔄 Initiating system reboot in 10 seconds...")
+                print("   Press Ctrl+C to cancel")
+                try:
+                    subprocess.run(['sleep', '10'], check=True)
+                    subprocess.run(['sudo', 'reboot'], check=True)
+                except KeyboardInterrupt:
+                    print("\n❌ Reboot cancelled")
+                except subprocess.CalledProcessError:
+                    print("❌ Failed to initiate reboot")
+            else:
+                print("ℹ️  System reboot postponed. Please reboot when convenient.")
+    else:
+        print("⚠️  Could not determine if system reboot is needed")
+        if reboot_result.stderr:
+            print(f"Error details: {reboot_result.stderr.strip()}")
+
     return True
 
 def refresh_snaps():
@@ -739,7 +781,7 @@ def update_firmware(auto_yes=False):
         
         subprocess.run(command, check=True, capture_output=False)
         print("✅ Firmware updates completed successfully")
-        print("⚠️  A reboot may be required for firmware updates to take effect")
+        pending_actions.append("A reboot may be required for firmware updates to take effect.")
         
         return True
         
@@ -878,6 +920,10 @@ def main():
                        help='Interactive mode - prompt for user input (default is auto-yes)')
     parser.add_argument('--skip-system', action='store_true',
                        help='Skip system package updates')
+    parser.add_argument('--skip-vim', action='store_true',
+                        help='Skip vim plugin updates')
+    parser.add_argument('--skip-omz', action='store_true',
+                        help='Skip Oh My Zsh update')
     parser.add_argument('--skip-snap', action='store_true',
                        help='Skip snap refresh (Linux only)')
     parser.add_argument('--skip-flatpak', action='store_true',
@@ -907,7 +953,7 @@ def main():
     # Update system packages
     if not args.skip_system:
         total_tasks += 1
-        if update_system_packages(auto_yes):
+        if update_system_packages(auto_yes, skip_vim=args.skip_vim, skip_omz=args.skip_omz):
             success_count += 1
     
     # Refresh snaps (Linux only)
@@ -962,7 +1008,15 @@ def main():
         if docker_system_prune(auto_yes):
             success_count += 1
     
-    # Summary
+    # Pending actions summary
+    if pending_actions:
+        print(f"\n{'='*50}")
+        print("🔔 PENDING ACTIONS")
+        print(f"{'='*50}")
+        for action in pending_actions:
+            print(f"  - {action}")
+
+    # Final summary
     print(f"\n{'='*50}")
     print("📊 SUMMARY")
     print(f"{'='*50}")

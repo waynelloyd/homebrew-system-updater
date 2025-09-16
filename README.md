@@ -12,7 +12,10 @@ A comprehensive cross-platform system update script that handles package managem
 ### 🔄 Intelligent Updates
 - **Smart Service Restart**: Detects and restarts services that need it (Fedora/RHEL)
 - **System Reboot Detection**: Prompts for reboot when required
+- **Pending Actions Summary**: Provides a clear, consolidated list of required follow-up actions, such as system reboots, at the end of the script.
 - **Docker Container Management**: Only restarts containers when updates are detected
+- **Vim Plugin Management**: Automatically updates Vim plugins (Vundle).
+- **Oh My Zsh**: Keeps your Oh My Zsh installation up-to-date (macOS only).
 - **Graceful Fallbacks**: Skips unavailable package managers without errors
 
 ## Functionality by Operating System
@@ -76,6 +79,8 @@ A comprehensive cross-platform system update script that handles package managem
 - **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
+- **Vim Plugins**: `vim +PluginUpdate +qall` (Vundle, if installed)
+- **Oh My Zsh**: `omz update` (if installed)
 - **Docker**: Compose pull/restart + system prune
 
 ---
@@ -175,6 +180,12 @@ system-updater --skip-firmware
 # Skip pip package updates
 system-updater --skip-pip
 
+# Skip Vim plugin updates
+system-updater --skip-vim
+
+# Skip Oh My Zsh update (macOS)
+system-updater --skip-omz
+
 # Enable MacUpdater (opt-in only)
 system-updater --macupdater
 
@@ -193,6 +204,8 @@ system-updater --help
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
+- `--skip-vim` - Skip Vim plugin updates
+- `--skip-omz` - Skip Oh My Zsh update (macOS only)
 - `--macupdater` - Enable MacUpdater for Mac applications (macOS only, opt-in)
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
@@ -225,6 +238,7 @@ system-updater --skip-snap --skip-flatpak
 
 - **Service Restart Confirmation**: Always prompts before restarting services
 - **System Reboot Safety**: Requires manual confirmation even with `-y` flag
+- **Pending Actions Summary**: Summarizes all required manual steps (like reboots) at the end, so you don't miss anything.
 - **Graceful Failures**: Continues operation if individual package managers fail
 - **Update Detection**: Only restarts Docker containers when actual updates occur
 - **Comprehensive Logging**: Clear output showing what's being updated and why
@@ -234,23 +248,26 @@ system-updater --skip-snap --skip-flatpak
 ```
 🚀 Starting system update process...
 Mode: Auto-yes
-Detected OS: ubuntu
+Detected OS: macos
 
 ==================================================
-Running: Updating package lists
-Command: sudo apt update
+Running: Updating Homebrew
+Command: brew update
 ==================================================
-✅ Updating package lists completed successfully
+✅ Updating Homebrew completed successfully
+
+...
+(other updates)
+...
 
 ==================================================
-Running: Upgrading packages
-Command: sudo apt upgrade
+🔔 PENDING ACTIONS
 ==================================================
-✅ Upgrading packages completed successfully
+  - A restart is required to complete the installation of some macOS updates.
 
 📊 SUMMARY
 ==================================================
-Tasks completed successfully: 8/8
+Tasks completed successfully: 10/10
 🎉 All tasks completed successfully!
 ```
 
