@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.2"
+__version__ = "1.0.1"
 
 # Global list to store pending actions
 pending_actions = []
