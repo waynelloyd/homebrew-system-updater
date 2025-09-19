@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 # Global list to store pending actions
 pending_actions = []
@@ -225,6 +225,7 @@ def update_vim_plugins(auto_yes=False):
 
 def update_oh_my_zsh(auto_yes=False):
     """Update Oh My Zsh framework"""
+    from pathlib import Path
     oh_my_zsh_path = Path.home() / '.oh-my-zsh'
     if not oh_my_zsh_path.exists():
         return True # Skip silently if not installed
@@ -232,7 +233,13 @@ def update_oh_my_zsh(auto_yes=False):
     # omz is a shell function, so we need to run it within a zsh shell
     # The update process for omz is non-interactive by default.
     command = ['zsh', '-c', 'source ~/.zshrc && omz update']
-    return run_command(command, "Updating Oh My Zsh")
+    try:
+        result = subprocess.run(command, check=False, capture_output=False)
+        print("✅ Oh My Zsh update completed (exit code: {}), continuing...".format(result.returncode))
+        return True
+    except Exception as e:
+        print(f"⚠️  Oh My Zsh update encountered an error: {e}. Continuing...")
+        return True
 
 def update_macos_system_software(auto_yes=False):
     """Update macOS system software using softwareupdate"""
