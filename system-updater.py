@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 # Global list to store pending actions
 pending_actions = []
@@ -227,12 +227,12 @@ def update_oh_my_zsh(auto_yes=False):
     """Update Oh My Zsh framework"""
     from pathlib import Path
     oh_my_zsh_path = Path.home() / '.oh-my-zsh'
-    if not oh_my_zsh_path.exists():
-        return True # Skip silently if not installed
+    upgrade_script = oh_my_zsh_path / 'tools' / 'upgrade.sh'
+    if not oh_my_zsh_path.exists() or not upgrade_script.exists():
+        return True # Skip silently if not installed or upgrade script missing
 
-    # omz is a shell function, so we need to run it within a zsh shell
-    # The update process for omz is non-interactive by default.
-    command = ['zsh', '-c', 'source ~/.zshrc && omz update']
+    # Run the upgrade script directly with zsh
+    command = ['zsh', str(upgrade_script)]
     try:
         result = subprocess.run(command, check=False, capture_output=False)
         print("✅ Oh My Zsh update completed (exit code: {}), continuing...".format(result.returncode))
