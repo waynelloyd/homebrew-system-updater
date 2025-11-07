@@ -13,13 +13,15 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 # Global list to store pending actions
 pending_actions = []
+# Global list to store failures/issues that need attention
+failures = []
 
 def run_command(command, description, auto_yes=False):
-    """Run a command and handle output"""
+    """Run a command and handle output, recording failures into `failures`"""
     print(f"\n{'='*50}")
     print(f"Running: {description}")
     print(f"Command: {' '.join(command)}")
@@ -35,10 +37,14 @@ def run_command(command, description, auto_yes=False):
         print(f"✅ {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"❌ {description} failed with exit code {e.returncode}")
+        msg = f"{description} failed with exit code {e.returncode} (command: {' '.join(command)})"
+        print(f"❌ {msg}")
+        failures.append(msg)
         return False
     except FileNotFoundError:
-        print(f"❌ Command not found: {command[0]}")
+        msg = f"Command not found: {command[0]} (command: {' '.join(command)})"
+        print(f"❌ {msg}")
+        failures.append(msg)
         return False
 
 def get_config_file():
@@ -222,6 +228,69 @@ def update_vim_plugins(auto_yes=False):
         return True # Skip silently if Vundle not installed
         
     return run_command(['vim', '+PluginUpdate', '+qall'], "Updating Vim plugins")
+
+# New: update tmux plugins via TPM if present (~/.tmux/plugins/tpm)
+def update_tmux_plugins(auto_yes=False):
+    """Update tmux plugins using TPM if installed (~/.tmux/plugins/tpm).
+
+    This locates the TPM update_plugins script in common locations (including
+    ~/.tmux/plugins/tpm/bin/update_plugins), ensures the tmux server is started,
+    and runs the script with bash. Failures are recorded in the global
+    `failures` list but don't stop the rest of the run.
+    """
+    tpm_base = Path.home() / '.tmux' / 'plugins' / 'tpm'
+    if not tpm_base.exists():
+        return True  # TPM not installed, skip silently
+
+    # Common candidate locations for the update script
+    candidates = [
+        tpm_base / 'bin' / 'update_plugins',
+        tpm_base / 'update_plugins',
+        tpm_base / 'scripts' / 'update_plugins',
+    ]
+
+    update_script = None
+    for cand in candidates:
+        if cand.exists():
+            update_script = cand
+            break
+
+    if not update_script:
+        # Not found, skip silently but record a warning for visibility
+        msg = f"TPM update script not found in {tpm_base} (checked {', '.join(str(p) for p in candidates)})"
+        print(f"⚠️  {msg}")
+        failures.append(msg)
+        return False
+
+    print(f"\n{'='*50}")
+    print("Running: Updating tmux plugins (TPM)")
+    print(f"Script: {update_script} all")
+    print(f"{'='*50}")
+
+    # Ensure tmux server is available - start it if necessary (no-op if already running)
+    try:
+        subprocess.run(['tmux', 'start-server'], check=False, capture_output=True)
+    except FileNotFoundError:
+        msg = "tmux command not found; cannot update tmux plugins"
+        print(f"❌ {msg}")
+        failures.append(msg)
+        return False
+
+    # Execute the update script using bash (more portable than direct exec)
+    try:
+        subprocess.run(['bash', str(update_script), 'all'], check=True, capture_output=False)
+        print("✅ tmux plugins updated successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        msg = f"tmux plugin update failed with exit code {e.returncode} (command: {update_script} all)"
+        print(f"❌ {msg}")
+        failures.append(msg)
+        return False
+    except Exception as e:
+        msg = f"tmux plugin update encountered an error: {e}"
+        print(f"⚠️  {msg}. Continuing...")
+        failures.append(msg)
+        return False
 
 def update_oh_my_zsh(auto_yes=False):
     """Update Oh My Zsh framework"""
@@ -857,63 +926,213 @@ def docker_system_prune(auto_yes=False):
     
     return run_command(command, "Cleaning up Docker system (prune -a)", auto_yes)
 
+def config_get_bool(config, *keys, default=False):
+    """Return a boolean from the config for any of the provided keys.
+    Keys may be provided with hyphens or underscores (e.g. 'skip-docker-prune' or 'skip_docker_prune').
+    Handles string values like 'true'/'yes' as well as booleans.
+    """
+    for key in keys:
+        if key in config:
+            val = config[key]
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.strip().lower() in ('1', 'true', 'yes', 'y')
+            try:
+                return bool(val)
+            except Exception:
+                continue
+    return default
+
+
+def interactive_configure(config, os_type):
+    """Interactive configuration writer. Prompts the user for common flags and saves them to config file."""
+    print(f"\n{'='*60}")
+    print("🛠  Interactive configuration for system-updater")
+    print(f"{'='*60}\n")
+
+    def ask_bool(prompt, current=False):
+        default_hint = 'Y/n' if current else 'y/N'
+        resp = input(f"{prompt} ({default_hint}): ").strip().lower()
+        if not resp:
+            return bool(current)
+        return resp[0] in ('y', '1', 't')
+
+    # Build new config starting from existing config
+    new_config = dict(config)
+
+    def set_config_val(key, value):
+        # Preserve string representation if original config used strings
+        if key in config and isinstance(config[key], str):
+            new_config[key] = 'true' if bool(value) else 'false'
+        else:
+            new_config[key] = value
+
+    # Common options
+    set_config_val('skip-os-updates', ask_bool('Skip OS updates by default?', config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False)))
+    set_config_val('skip-vim', ask_bool('Skip vim plugin updates by default?', config_get_bool(config, 'skip-vim', 'skip_vim', False)))
+    set_config_val('skip-tmux', ask_bool('Skip tmux plugin updates (TPM) by default?', config_get_bool(config, 'skip-tmux', 'skip_tmux', False)))
+    set_config_val('skip-pip', ask_bool('Skip pip package updates by default?', config_get_bool(config, 'skip-pip', 'skip_pip', False)))
+    set_config_val('skip-docker-pull', ask_bool('Skip docker-compose pull by default?', config_get_bool(config, 'skip-docker-pull', 'skip_docker_pull', False)))
+    set_config_val('skip-docker-prune', ask_bool('Skip docker system prune by default?', config_get_bool(config, 'skip-docker-prune', 'skip_docker_prune', False)))
+    set_config_val('skip-tmux', ask_bool('Skip tmux plugin updates (TPM) by default?', config_get_bool(config, 'skip-tmux', 'skip_tmux', False)))
+    set_config_val('skip-pip', ask_bool('Skip pip package updates by default?', config_get_bool(config, 'skip-pip', 'skip_pip', False)))
+    set_config_val('skip-docker-pull', ask_bool('Skip docker-compose pull by default?', config_get_bool(config, 'skip-docker-pull', 'skip_docker_pull', False)))
+    set_config_val('skip-docker-prune', ask_bool('Skip docker system prune by default?', config_get_bool(config, 'skip-docker-prune', 'skip_docker_prune', False)))
+
+    # Platform specific
+    if os_type == 'macos':
+        set_config_val('skip-homebrew', ask_bool('Skip Homebrew updates by default?', config_get_bool(config, 'skip-homebrew', 'skip_homebrew', False)))
+        set_config_val('skip-mas', ask_bool('Skip Mac App Store updates by default?', config_get_bool(config, 'skip-mas', 'skip_mas', False)))
+        set_config_val('macupdater', ask_bool('Enable MacUpdater by default?', config_get_bool(config, 'macupdater', 'mac_updater', False)))
+        set_config_val('skip-omz', ask_bool('Skip Oh My Zsh updates by default?', config_get_bool(config, 'skip-omz', 'skip_omz', False)))
+    else:
+        set_config_val('skip-snap', ask_bool('Skip snap refresh by default?', config_get_bool(config, 'skip-snap', 'skip_snap', False)))
+        set_config_val('skip-flatpak', ask_bool('Skip Flatpak updates by default?', config_get_bool(config, 'skip-flatpak', 'skip_flatpak', False)))
+        set_config_val('skip-firmware', ask_bool('Skip firmware updates by default?', config_get_bool(config, 'skip-firmware', 'skip_firmware', False)))
+        set_config_val('skip-omz', ask_bool('Skip Oh My Zsh updates by default?', config_get_bool(config, 'skip-omz', 'skip_omz', False)))
+        set_config_val('service-restart', ask_bool('Automatically restart services detected by dnf needs-restarting?', config_get_bool(config, 'service-restart', 'service_restart', False)))
+
+    # Docker compose setup question
+    enable_docker = ask_bool('Enable docker-compose operations by default?', config.get('docker_compose_enabled', False))
+    set_config_val('docker_compose_enabled', enable_docker)
+
+    if enable_docker:
+        # Offer to discover compose paths
+        if ask_bool('Auto-discover docker-compose paths now and save them in config?', False):
+            discovered = [str(p) for p in find_docker_compose_files()]
+            print(f"Found {len(discovered)} docker-compose directory(ies)")
+            # Preserve list type
+            new_config['docker_compose_paths'] = discovered
+
+    # Save the new config
+    if save_config(new_config):
+        cfg_path = get_config_file()
+        print(f"\n✅ Configuration saved to: {cfg_path}")
+    else:
+        print("\n❌ Failed to save configuration")
+
+    print("\nYou can always edit the file manually or run `system-updater --print-config` to see the effective settings.")
+    sys.exit(0)
+
 def main():
-    parser = argparse.ArgumentParser(description='Cross-platform system update script for Linux/macOS with Docker maintenance')
-    parser.add_argument(
-        '--version',
-        action='version',
-        version=f'%(prog)s {__version__}',
-        help="Show program's version number and exit."
+    # Detect OS before building the CLI parser so we can expose only relevant flags in --help
+    os_type = detect_os()
+
+    # Load user config early so config values can be used as defaults for CLI flags
+    config = load_config()
+
+    epilog = """
+Example config file (~/.config/system-updater/config.json):
+
+  {
+    "skip-docker-prune": true,
+    "skip-tmux": true
+  }
+
+Keys accept hyphen or underscore styles (e.g. `skip-docker-prune` or `skip_docker_prune`).
+Command-line flags override config when provided. Run `--help` to see platform-specific flags.
+"""
+
+    parser = argparse.ArgumentParser(
+        description='Cross-platform system update script for Linux/macOS with Docker maintenance',
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('-i', '--interactive', action='store_true', 
-                       help='Interactive mode - prompt for user input (default is auto-yes)')
-    parser.add_argument('--skip-system', action='store_true',
-                       help='Skip system package updates (macOS: Homebrew, MAS, etc.)')
-    parser.add_argument('--skip-vim', action='store_true',
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    parser.add_argument('-i', '--interactive', action='store_true', default=config_get_bool(config, 'interactive', 'interactive_mode', False),
+                        help='Interactive mode - prompt for user input (default is auto-yes)')
+
+    # Common flags for all platforms (defaults pulled from config)
+    parser.add_argument('--skip-os-updates', action='store_true', default=config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False),
+                        help='Skip operating system updates (e.g., macOS softwareupdate, apt/dnf upgrade)')
+    parser.add_argument('--skip-vim', action='store_true', default=config_get_bool(config, 'skip-vim', 'skip_vim', False),
                         help='Skip vim plugin updates')
-    parser.add_argument('--skip-omz', action='store_true',
-                        help='Skip Oh My Zsh update')
-    parser.add_argument('--skip-snap', action='store_true',
-                       help='Skip snap refresh (Linux only)')
-    parser.add_argument('--skip-flatpak', action='store_true',
-                       help='Skip Flatpak updates (Linux only)')
-    parser.add_argument('--skip-pip', action='store_true',
-                       help='Skip pip package updates')
-    parser.add_argument('--macupdater', action='store_true',
-                       help='Enable MacUpdater for Mac application updates (macOS only)')
-    parser.add_argument('--skip-firmware', action='store_true',
-                       help='Skip firmware updates (Linux only)')
-    parser.add_argument('--skip-docker-pull', action='store_true',
-                       help='Skip docker-compose pull')
-    parser.add_argument('--skip-docker-prune', action='store_true',
-                       help='Skip docker system prune')
-    parser.add_argument('--service-restart', action='store_true',
-                   help='Automatically restart services detected by dnf needs-restarting without confirmation')
+    parser.add_argument('--skip-pip', action='store_true', default=config_get_bool(config, 'skip-pip', 'skip_pip', False),
+                        help='Skip pip package updates')
+    parser.add_argument('--skip-docker-pull', action='store_true', default=config_get_bool(config, 'skip-docker-pull', 'skip_docker_pull', False),
+                        help='Skip docker-compose pull')
+    parser.add_argument('--skip-docker-prune', action='store_true', default=config_get_bool(config, 'skip-docker-prune', 'skip_docker_prune', False),
+                        help='Skip docker system prune')
+    parser.add_argument('--skip-tmux', action='store_true', default=config_get_bool(config, 'skip-tmux', 'skip_tmux', False),
+                        help='Skip tmux plugin updates (TPM)')
+    parser.add_argument('--print-config', action='store_true', default=False,
+                        help='Print the effective configuration (config file merged with CLI flags) and exit')
+    parser.add_argument('--configure', action='store_true', default=False,
+                        help='Run interactive configuration wizard and exit')
+
+    # Platform-specific flags (defaults pulled from config)
+    if os_type == 'macos':
+        parser.add_argument('--skip-homebrew', action='store_true', default=config_get_bool(config, 'skip-homebrew', 'skip_homebrew', False),
+                            help='Skip Homebrew updates (macOS only)')
+        parser.add_argument('--skip-mas', action='store_true', default=config_get_bool(config, 'skip-mas', 'skip_mas', False),
+                            help='Skip Mac App Store updates (macOS only)')
+        parser.add_argument('--skip-omz', action='store_true', default=config_get_bool(config, 'skip-omz', 'skip_omz', False),
+                            help='Skip Oh My Zsh update')
+        parser.add_argument('--macupdater', action='store_true', default=config_get_bool(config, 'macupdater', 'mac_updater', False),
+                            help='Enable MacUpdater for Mac application updates (macOS only)')
+    elif os_type in ['ubuntu', 'fedora', 'rhel']:
+        parser.add_argument('--skip-snap', action='store_true', default=config_get_bool(config, 'skip-snap', 'skip_snap', False),
+                            help='Skip snap refresh (Linux only)')
+        parser.add_argument('--skip-flatpak', action='store_true', default=config_get_bool(config, 'skip-flatpak', 'skip_flatpak', False),
+                            help='Skip Flatpak updates (Linux only)')
+        parser.add_argument('--skip-firmware', action='store_true', default=config_get_bool(config, 'skip-firmware', 'skip_firmware', False),
+                            help='Skip firmware updates (Linux only)')
+        parser.add_argument('--skip-omz', action='store_true', default=config_get_bool(config, 'skip-omz', 'skip_omz', False),
+                            help='Skip Oh My Zsh update')
+        parser.add_argument('--service-restart', action='store_true', default=config_get_bool(config, 'service-restart', 'service_restart', False),
+                            help='Automatically restart services detected by dnf needs-restarting without confirmation')
 
     args = parser.parse_args()
-    
+
+    # Print effective config and exit if --print-config is set
+    if args.print_config:
+        # Reload config to ensure latest values are used
+        config = load_config()
+
+        # Compute effective config: start with defaults, override with config file, then CLI flags
+        effective_config = {
+            'skip_os_updates': config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False),
+            'skip_vim': config_get_bool(config, 'skip-vim', 'skip_vim', False),
+            'skip_pip': config_get_bool(config, 'skip-pip', 'skip_pip', False),
+            'skip_docker_pull': config_get_bool(config, 'skip-docker-pull', 'skip_docker_pull', False),
+            'skip_docker_prune': config_get_bool(config, 'skip-docker-prune', 'skip_docker_prune', False),
+            'skip_tmux': config_get_bool(config, 'skip-tmux', 'skip_tmux', False),
+            'interactive': config_get_bool(config, 'interactive', 'interactive_mode', False),
+            'macupdater': config_get_bool(config, 'macupdater', 'mac_updater', False),
+            # Add any other flags you want to include in the config printout
+        }
+
+        # Print the effective config
+        print(json.dumps(effective_config, indent=2))
+        sys.exit(0)
+
+    # Run interactive configuration wizard and exit if --configure is set
+    if args.configure:
+        interactive_configure(config, os_type)
+
+
     # Default to auto-yes unless interactive flag is set
     auto_yes = not args.interactive
-    
+
     print("🚀 Starting system update process...")
     print(f"Mode: {'Interactive' if args.interactive else 'Auto-yes'}")
-    
+    print(f"Detected OS: {os_type}")
+
     success_count = 0
     total_tasks = 0
-    
-    os_type = detect_os()
-    print(f"Detected OS: {os_type}")
 
     if os_type == 'macos':
         # Define macOS tasks
         macos_tasks = [
-            (update_macos_system_software, not args.skip_system, auto_yes),
-            (update_homebrew_packages, not args.skip_system, auto_yes),
-            (update_mas_apps, not args.skip_system, auto_yes),
+            (update_macos_system_software, not args.skip_os_updates, auto_yes),
+            (update_homebrew_packages, not args.skip_homebrew, auto_yes),
+            (update_mas_apps, not args.skip_mas, auto_yes),
             (update_ruby_gems, not args.skip_pip, auto_yes),
             (update_npm_packages, not args.skip_pip, auto_yes),
             (update_vim_plugins, not args.skip_vim, auto_yes),
             (update_oh_my_zsh, not args.skip_omz, auto_yes),
+            (update_tmux_plugins, not args.skip_tmux, auto_yes),
             (update_mac_apps, args.macupdater, auto_yes),
         ]
 
@@ -925,7 +1144,7 @@ def main():
 
     elif os_type in ['ubuntu', 'fedora', 'rhel']:
         # System packages
-        if not args.skip_system:
+        if not args.skip_os_updates:
             total_tasks += 1
             if os_type == 'ubuntu':
                 run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
@@ -940,6 +1159,7 @@ def main():
             (refresh_snaps, not args.skip_snap, auto_yes),
             (update_flatpaks, not args.skip_flatpak, auto_yes),
             (update_pip_packages, not args.skip_pip, auto_yes),
+            (update_tmux_plugins, not args.skip_tmux, auto_yes),
             (update_firmware, not args.skip_firmware, auto_yes),
         ]
         for task, should_run, *task_args in linux_tasks:
@@ -979,17 +1199,25 @@ def main():
         for action in pending_actions:
             print(f"  - {action}")
 
+    # Issues / failures summary
+    if failures:
+        print(f"\n{'='*50}")
+        print("🔧 ISSUES / FAILURES")
+        print(f"{'='*50}")
+        for issue in failures:
+            print(f"  - {issue}")
+
     # Final summary
     print(f"\n{'='*50}")
     print("📊 SUMMARY")
     print(f"{'='*50}")
     print(f"Tasks completed successfully: {success_count}/{total_tasks}")
     
-    if success_count == total_tasks:
+    if success_count == total_tasks and not failures:
         print("🎉 All tasks completed successfully!")
         sys.exit(0)
     else:
-        print("⚠️  Some tasks failed. Check the output above for details.")
+        print("⚠️  Some tasks failed or need attention. Check the 'ISSUES / FAILURES' and output above for details.")
         sys.exit(1)
 
 if __name__ == "__main__":

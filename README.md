@@ -15,6 +15,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **Pending Actions Summary**: Provides a clear, consolidated list of required follow-up actions, such as system reboots, at the end of the script.
 - **Docker Container Management**: Only restarts containers when updates are detected
 - **Vim Plugin Management**: Automatically updates Vim plugins (Vundle).
+- **Tmux Plugin Management**: Automatically updates tmux plugins via TPM if `~/.tmux/plugins/tpm` is present.
 - **Oh My Zsh**: Keeps your Oh My Zsh installation up-to-date (macOS only).
 - **Graceful Fallbacks**: Skips unavailable package managers without errors
 
@@ -80,6 +81,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
 - **Vim Plugins**: `vim +PluginUpdate +qall` (Vundle, if installed)
+- **Tmux Plugins**: `~/.tmux/plugins/tpm/update_plugins all` (TPM, if installed)
 - **Oh My Zsh**: `omz update` (if installed)
 - **Docker**: Compose pull/restart + system prune
 
@@ -166,7 +168,7 @@ system-updater --interactive
 ### Skip Specific Operations
 ```bash
 # Skip system package updates
-system-updater --skip-system
+system-updater --skip-os-updates
 
 # Skip snap packages (Linux)
 system-updater --skip-snap
@@ -183,6 +185,9 @@ system-updater --skip-pip
 # Skip Vim plugin updates
 system-updater --skip-vim
 
+# Skip Tmux plugin updates (TPM)
+system-updater --skip-tmux
+
 # Skip Oh My Zsh update (macOS)
 system-updater --skip-omz
 
@@ -193,6 +198,47 @@ system-updater --macupdater
 system-updater --skip-docker-pull --skip-docker-prune
 ```
 
+## Configuration file
+
+The script supports a per-user config file at `~/.config/system-updater/config.json`. Keys in this file are used as defaults for command-line flags (you can still pass flags on the command-line to override them).
+
+Example `~/.config/system-updater/config.json`:
+
+```json
+{
+  "skip-docker-prune": true,
+  "skip-tmux": true
+}
+```
+
+Both hyphenated and underscored key styles are accepted (e.g. `skip-docker-prune` or `skip_docker_prune`).
+
+Tip: run `system-updater --help` to see a short config-file example in the help output.
+
+### Interactive Configuration
+
+You can run an interactive configuration wizard to write `~/.config/system-updater/config.json`:
+
+```bash
+system-updater --configure
+```
+
+To print the effective configuration (config file merged with CLI flags):
+
+```bash
+system-updater --print-config
+```
+
+### Tmux plugin updates
+
+Tmux plugin updates are performed automatically when TPM is installed at `~/.tmux/plugins/tpm`. They run by default as part of the normal update flow unless you explicitly skip them with `--skip-tmux` or set `skip-tmux` in the config file. Example:
+
+```json
+{
+  "skip-tmux": true
+}
+```
+
 ### Command Line Options
 ```bash
 system-updater --help
@@ -200,17 +246,20 @@ system-updater --help
 
 **Available Options:**
 - `-i, --interactive` - Interactive mode with prompts (default is auto-yes)
-- `--skip-system` - Skip system package updates
+- `--skip-os-updates` - Skip system package updates
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
 - `--skip-vim` - Skip Vim plugin updates
+- `--skip-tmux` - Skip tmux plugin updates (TPM)
 - `--skip-omz` - Skip Oh My Zsh update (macOS only)
 - `--macupdater` - Enable MacUpdater for Mac applications (macOS only, opt-in)
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
 - `--skip-docker-prune` - Skip docker system prune
 - `--service-restart` - **Fedora/RHEL only**. Automatically restart services detected by `dnf needs-restarting` without confirmation. If not set, you will be prompted to confirm service restarts (y/n).
+
+**Failure summary behavior:** The script now collects failures and issues encountered during individual tasks and prints an "ISSUES / FAILURES" section at the end of the run. If any failures were recorded the script will exit with a non-zero exit code so you can detect problems in automation.
 
 ## Examples
 
@@ -226,7 +275,7 @@ system-updater --macupdater
 ### Development Environment Update
 ```bash
 # Update only development tools
-system-updater --skip-system --skip-firmware
+system-updater --skip-os-updates --skip-firmware
 ```
 
 ### Server Maintenance
@@ -237,10 +286,10 @@ system-updater --skip-snap --skip-flatpak
 
 ## Safety Features
 
-- **Service Restart Confirmation**: Always prompts before restarting services
+- **Service Restart Confirmation**: Always prompts before restarting services (unless `--service-restart` is used)
 - **System Reboot Safety**: Requires manual confirmation even with `-y` flag
 - **Pending Actions Summary**: Summarizes all required manual steps (like reboots) at the end, so you don't miss anything.
-- **Graceful Failures**: Continues operation if individual package managers fail
+- **Graceful Failures**: Continues operation if individual package managers fail, and records failures for later review.
 - **Update Detection**: Only restarts Docker containers when actual updates occur
 - **Comprehensive Logging**: Clear output showing what's being updated and why
 
@@ -266,10 +315,15 @@ Command: brew update
 ==================================================
   - A restart is required to complete the installation of some macOS updates.
 
+==================================================
+🔧 ISSUES / FAILURES
+==================================================
+  - Docker-compose pull failed in /home/user/projects/app with exit code 1 (command: docker-compose pull)
+
 📊 SUMMARY
 ==================================================
-Tasks completed successfully: 10/10
-🎉 All tasks completed successfully!
+Tasks completed successfully: 10/11
+⚠️  Some tasks failed or need attention. Check the 'ISSUES / FAILURES' and output above for details.
 ```
 
 ## Requirements
