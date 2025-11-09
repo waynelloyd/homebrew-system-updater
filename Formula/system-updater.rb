@@ -6,7 +6,7 @@ class SystemUpdater < Formula
   # 2. Get the .tar.gz URL and its SHA256 hash from the new release page.
   # 3. Update the `url` and `sha256` below.
   url "https://github.com/waynelloyd/homebrew-system-updater/archive/refs/tags/v1.0.4.tar.gz"
-  sha256 "940cf710d87a543cc4b9a452f5435298921167d266a15e78a46c6cc54f30d7ac"
+  sha256 "6a3aa0bd7da7945302558e3b7180aa8fccfdbd26cd7fa6ad3654f8406f3b2aa2"
   license "MIT"
 
   def install
