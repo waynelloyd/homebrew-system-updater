@@ -30,7 +30,7 @@ A comprehensive cross-platform system update script that handles package managem
 #### Additional Package Managers
 - **Snap Packages**: `sudo snap refresh`
 - **Flatpak**: `flatpak update --appstream && flatpak update -y`
-- **Firmware**: `fwupdmgr refresh && fwupdmgr update`
+- **Firmware**: `fwupdmgr refresh && fwupdmgr get-updates` — the script defaults to auto-yes and will automatically apply firmware updates when detected (it will run `fwupdmgr refresh --force` then `fwupdmgr update` when applying). If you prefer prompts, run the script with `-i/--interactive` to confirm before applying. Use `--apply-firmware` or set `"apply-firmware": true` in the config to enable unattended apply; use `--skip-firmware` to skip firmware checks entirely.
 
 #### Developer Tools
 - **pip3**: Updates outdated Python packages
@@ -51,7 +51,7 @@ A comprehensive cross-platform system update script that handles package managem
 #### Additional Package Managers
 - **Snap Packages**: `sudo snap refresh`
 - **Flatpak**: `flatpak update --appstream && flatpak update -y`
-- **Firmware**: `fwupdmgr refresh && fwupdmgr update`
+- **Firmware**: `fwupdmgr refresh && fwupdmgr get-updates` — the script defaults to auto-yes and will automatically apply firmware updates when detected (it will run `fwupdmgr refresh --force` then `fwupdmgr update` when applying). If you prefer prompts, run the script with `-i/--interactive` to confirm before applying. Use `--apply-firmware` or set `"apply-firmware": true` in the config to enable unattended apply; use `--skip-firmware` to skip firmware checks entirely.
 
 #### Developer Tools
 - **pip3**: Updates outdated Python packages
@@ -207,7 +207,8 @@ Example `~/.config/system-updater/config.json`:
 ```json
 {
   "skip-docker-prune": true,
-  "skip-tmux": true
+  "skip-tmux": true,
+  "apply-firmware": false
 }
 ```
 
@@ -239,6 +240,8 @@ Tmux plugin updates are performed automatically when TPM is installed at `~/.tmu
 }
 ```
 
+Note: TPM updates run by default (no separate "run-only" flag). To skip them permanently set `skip-tmux` in `~/.config/system-updater/config.json` or pass `--skip-tmux` on the command-line.
+
 ### Command Line Options
 ```bash
 system-updater --help
@@ -257,7 +260,10 @@ system-updater --help
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
 - `--skip-docker-prune` - Skip docker system prune
+- `--apply-firmware` - Automatically apply firmware updates when detected (runs a forced refresh and applies updates). Use with caution on servers.
 - `--service-restart` - **Fedora/RHEL only**. Automatically restart services detected by `dnf needs-restarting` without confirmation. If not set, you will be prompted to confirm service restarts (y/n).
+- `--print-config` - Print the effective configuration (config file merged with CLI flags) and exit.
+- `--configure` - Launch the interactive configurator to create or update `~/.config/system-updater/config.json` and exit.
 
 **Failure summary behavior:** The script now collects failures and issues encountered during individual tasks and prints an "ISSUES / FAILURES" section at the end of the run. If any failures were recorded the script will exit with a non-zero exit code so you can detect problems in automation.
 

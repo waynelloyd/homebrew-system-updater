@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 # Global list to store pending actions
 pending_actions = []
@@ -742,8 +742,15 @@ def update_mac_apps(auto_yes=False):
     # Apply updates
     return run_command([macupdater_path, 'update'], "Updating Mac applications")
 
-def update_firmware(auto_yes=False):
-    """Update firmware using fwupdmgr (Linux only)"""
+def update_firmware(auto_yes=False, apply_firmware=False):
+    """Update firmware using fwupdmgr (Linux only).
+
+    Behavior:
+      - Run `fwupdmgr refresh` (non-forced) and handle exit codes (treat 2 as warning).
+      - Run `fwupdmgr get-updates` to detect available updates.
+      - If updates are available, prompt the user to confirm applying them (unless auto_yes).
+      - If confirmed, perform a forced refresh (`fwupdmgr refresh --force`) for robustness, then apply updates.
+    """
     os_type = detect_os()
     if os_type == 'macos':
         return True  # Skip silently on macOS
@@ -757,19 +764,40 @@ def update_firmware(auto_yes=False):
         print("   Install with: sudo apt install fwupd (Ubuntu) or sudo dnf install fwupd (Fedora)")
         return True
     
-    # Refresh firmware metadata
+    # Refresh firmware metadata (normal refresh)
     print(f"\n{'='*50}")
     print("Running: Refreshing firmware metadata")
-    print(f"Command: fwupdmgr refresh")
+    refresh_cmd = ['fwupdmgr', 'refresh']
+    print(f"Command: {' '.join(refresh_cmd)}")
     print(f"{'='*50}")
     
     try:
-        subprocess.run(['fwupdmgr', 'refresh'], check=True, capture_output=False)
-        print("✅ Firmware metadata refreshed successfully")
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️  Firmware metadata refresh failed with exit code {e.returncode}")
-        # Continue anyway as this might not be critical
-    
+        # Run without raising on non-zero so we can handle specific fwupdmgr exit codes gracefully
+        refresh_result = subprocess.run(refresh_cmd, check=False, capture_output=True, text=True)
+
+        if refresh_result.returncode == 0:
+            print("✅ Firmware metadata refreshed successfully")
+        elif refresh_result.returncode == 2:
+            # Exit code 2 is commonly used by fwupdmgr to indicate non-fatal conditions
+            # (e.g. UEFI capsule updates not available). Treat this as a warning and continue.
+            print("⚠️  Firmware metadata refresh returned exit code 2 - non-fatal (capsules unsupported or similar). Continuing...")
+            if refresh_result.stdout:
+                print(refresh_result.stdout.strip())
+            if refresh_result.stderr:
+                print(refresh_result.stderr.strip())
+        else:
+            # Other non-zero exit codes are unexpected; record as a failure for visibility
+            print(f"⚠️  Firmware metadata refresh failed with exit code {refresh_result.returncode}")
+            if refresh_result.stdout:
+                print("STDOUT:", refresh_result.stdout)
+            if refresh_result.stderr:
+                print("STDERR:", refresh_result.stderr)
+            failures.append(f"Firmware metadata refresh failed with exit code {refresh_result.returncode}")
+    except Exception as e:
+        # Catch any unexpected exception from subprocess.run so the script can continue
+        print(f"⚠️  Exception while refreshing firmware metadata: {e}")
+        failures.append(f"fwupdmgr refresh exception: {e}")
+
     # Check for available firmware updates
     print(f"\n{'='*50}")
     print("Running: Checking for firmware updates")
@@ -787,22 +815,52 @@ def update_firmware(auto_yes=False):
         print("📋 Available firmware updates:")
         print(result.stdout)
         
+        # Decide whether to apply updates: apply if --apply-firmware was set, or in auto_yes mode,
+        # otherwise prompt the user for confirmation.
+        if apply_firmware or auto_yes:
+            apply_confirm = True
+        else:
+            apply_confirm = input("\n🤔 Apply these firmware updates now? (y/N): ").lower().startswith('y')
+
+        if not apply_confirm:
+            print("ℹ️  Firmware updates were not applied. You can run 'fwupdmgr update' manually later.")
+            pending_actions.append("Firmware updates are available but were not applied automatically.")
+            return True
+
+        # User confirmed: perform a forced refresh before applying updates for robustness
+        print(f"\n{'='*50}")
+        print("Running: Refreshing firmware metadata (forced)")
+        print("Command: fwupdmgr refresh --force")
+        print(f"{'='*50}")
+        try:
+            subprocess.run(['fwupdmgr', 'refresh', '--force'], check=False, capture_output=True, text=True)
+        except Exception:
+            # Non-fatal; we'll attempt to apply updates anyway and capture failures
+            pass
+
         # Apply firmware updates
         command = ['sudo', 'fwupdmgr', 'update']
         if auto_yes:
             command.append('--assume-yes')
-        
+
         print(f"\n{'='*50}")
         print("Running: Applying firmware updates")
         print(f"Command: {' '.join(command)}")
         print(f"{'='*50}")
-        
-        subprocess.run(command, check=True, capture_output=False)
-        print("✅ Firmware updates completed successfully")
-        pending_actions.append("A reboot may be required for firmware updates to take effect.")
-        
-        return True
-        
+
+        try:
+            subprocess.run(command, check=True, capture_output=False)
+            print("✅ Firmware updates completed successfully")
+            pending_actions.append("A reboot may be required for firmware updates to take effect.")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Firmware update failed with exit code {e.returncode}")
+            if e.stdout:
+                print("STDOUT:", e.stdout)
+            if e.stderr:
+                print("STDERR:", e.stderr)
+            failures.append(f"Firmware update failed with exit code {e.returncode}")
+            return False
     except subprocess.CalledProcessError as e:
         if e.returncode == 2:  # No updates available
             print("ℹ️  No firmware updates available")
@@ -814,6 +872,9 @@ def update_firmware(auto_yes=False):
             if e.stderr:
                 print("STDERR:", e.stderr)
             return False
+    except Exception as e:
+        print(f"⚠️  An error occurred while checking or applying firmware updates: {e}")
+        return False
 
 def docker_compose_pull(auto_yes=False):
     """Pull docker-compose images in configured directories and restart if updates found"""
@@ -990,6 +1051,7 @@ def interactive_configure(config, os_type):
         set_config_val('skip-snap', ask_bool('Skip snap refresh by default?', config_get_bool(config, 'skip-snap', 'skip_snap', False)))
         set_config_val('skip-flatpak', ask_bool('Skip Flatpak updates by default?', config_get_bool(config, 'skip-flatpak', 'skip_flatpak', False)))
         set_config_val('skip-firmware', ask_bool('Skip firmware updates by default?', config_get_bool(config, 'skip-firmware', 'skip_firmware', False)))
+        set_config_val('apply-firmware', ask_bool('Automatically apply firmware updates when detected?', config_get_bool(config, 'apply-firmware', 'apply_firmware', False)))
         set_config_val('skip-omz', ask_bool('Skip Oh My Zsh updates by default?', config_get_bool(config, 'skip-omz', 'skip_omz', False)))
         set_config_val('service-restart', ask_bool('Automatically restart services detected by dnf needs-restarting?', config_get_bool(config, 'service-restart', 'service_restart', False)))
 
@@ -1078,6 +1140,8 @@ Command-line flags override config when provided. Run `--help` to see platform-s
                             help='Skip Flatpak updates (Linux only)')
         parser.add_argument('--skip-firmware', action='store_true', default=config_get_bool(config, 'skip-firmware', 'skip_firmware', False),
                             help='Skip firmware updates (Linux only)')
+        parser.add_argument('--apply-firmware', action='store_true', default=config_get_bool(config, 'apply-firmware', 'apply_firmware', False),
+                            help='Automatically apply firmware updates when detected (runs a forced refresh and applies updates)')
         parser.add_argument('--skip-omz', action='store_true', default=config_get_bool(config, 'skip-omz', 'skip_omz', False),
                             help='Skip Oh My Zsh update')
         parser.add_argument('--service-restart', action='store_true', default=config_get_bool(config, 'service-restart', 'service_restart', False),
@@ -1100,7 +1164,13 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             'skip_tmux': config_get_bool(config, 'skip-tmux', 'skip_tmux', False),
             'interactive': config_get_bool(config, 'interactive', 'interactive_mode', False),
             'macupdater': config_get_bool(config, 'macupdater', 'mac_updater', False),
-            # Add any other flags you want to include in the config printout
+            # Linux-specific options
+            'skip_firmware': config_get_bool(config, 'skip-firmware', 'skip_firmware', False),
+            'apply_firmware': config_get_bool(config, 'apply-firmware', 'apply_firmware', False),
+            'service_restart': config_get_bool(config, 'service-restart', 'service_restart', False),
+            'skip_snap': config_get_bool(config, 'skip-snap', 'skip_snap', False),
+            'skip_flatpak': config_get_bool(config, 'skip-flatpak', 'skip_flatpak', False),
+             # Add any other flags you want to include in the config printout
         }
 
         # Print the effective config
@@ -1160,7 +1230,7 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             (update_flatpaks, not args.skip_flatpak, auto_yes),
             (update_pip_packages, not args.skip_pip, auto_yes),
             (update_tmux_plugins, not args.skip_tmux, auto_yes),
-            (update_firmware, not args.skip_firmware, auto_yes),
+            (update_firmware, not args.skip_firmware, auto_yes, args.apply_firmware),
         ]
         for task, should_run, *task_args in linux_tasks:
             if should_run:
