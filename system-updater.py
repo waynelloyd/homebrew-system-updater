@@ -11,9 +11,11 @@ import argparse
 import platform
 import json
 from pathlib import Path
+import time
+import itertools
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 # Global list to store pending actions
 pending_actions = []
@@ -757,17 +759,17 @@ def update_firmware(auto_yes=False, apply_firmware=False):
     
     # Check if fwupdmgr is installed
     try:
-        subprocess.run(['fwupdmgr', '--version'], check=True, capture_output=True)
+        subprocess.run(['sudo', 'fwupdmgr', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("  fwupdmgr not found or not installed, skipping firmware updates")
-        print("⚠️  fwupdmgr not found or not installed, skipping firmware updates")
-        print("   Install with: sudo apt install fwupd (Ubuntu) or sudo dnf install fwupd (Fedora)")
+        msg = "fwupdmgr not found or not installed. Install with: sudo apt install fwupd (Ubuntu) or sudo dnf install fwupd (Fedora)"
+        print(f"⚠️  {msg}")
+        failures.append(msg)
         return True
     
     # Refresh firmware metadata (normal refresh)
     print(f"\n{'='*50}")
     print("Running: Refreshing firmware metadata")
-    refresh_cmd = ['fwupdmgr', 'refresh']
+    refresh_cmd = ['sudo', 'fwupdmgr', 'refresh']
     print(f"Command: {' '.join(refresh_cmd)}")
     print(f"{'='*50}")
     
@@ -801,11 +803,12 @@ def update_firmware(auto_yes=False, apply_firmware=False):
     # Check for available firmware updates
     print(f"\n{'='*50}")
     print("Running: Checking for firmware updates")
-    print(f"Command: fwupdmgr get-updates")
+    get_updates_cmd = ['sudo', 'fwupdmgr', 'get-updates']
+    print(f"Command: {' '.join(get_updates_cmd)}")
     print(f"{'='*50}")
     
     try:
-        result = subprocess.run(['fwupdmgr', 'get-updates'], 
+        result = subprocess.run(get_updates_cmd, 
                               check=True, capture_output=True, text=True)
         
         if "No updates available" in result.stdout or not result.stdout.strip():
@@ -830,10 +833,11 @@ def update_firmware(auto_yes=False, apply_firmware=False):
         # User confirmed: perform a forced refresh before applying updates for robustness
         print(f"\n{'='*50}")
         print("Running: Refreshing firmware metadata (forced)")
-        print("Command: fwupdmgr refresh --force")
+        force_refresh_cmd = ['sudo', 'fwupdmgr', 'refresh', '--force']
+        print(f"Command: {' '.join(force_refresh_cmd)}")
         print(f"{'='*50}")
         try:
-            subprocess.run(['fwupdmgr', 'refresh', '--force'], check=False, capture_output=True, text=True)
+            subprocess.run(force_refresh_cmd, check=False, capture_output=True, text=True)
         except Exception:
             # Non-fatal; we'll attempt to apply updates anyway and capture failures
             pass
@@ -936,17 +940,35 @@ def docker_compose_pull(auto_yes=False):
             print(f"Command: docker-compose pull")
             print(f"{'='*50}")
             
-            try:
-                result = subprocess.run(['docker-compose', 'pull'], 
-                                      check=True, capture_output=True, text=True)
-                
+            spinner = itertools.cycle(['-', '/', '|', '\\'])
+            process = subprocess.Popen(['docker-compose', 'pull'], 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE, 
+                                       text=True)
+            
+            while process.poll() is None:
+                sys.stdout.write(f"\r{next(spinner)} Pulling images...")
+                sys.stdout.flush()
+                time.sleep(0.1)
+            
+            sys.stdout.write("\r") # Clear the spinner
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                print(f"❌ Docker-compose pull failed in {compose_path} with exit code {process.returncode}")
+                if stdout:
+                    print("STDOUT:", stdout)
+                if stderr:
+                    print("STDERR:", stderr)
+                overall_success = False
+            else:
                 # Check if any images were actually pulled (updated)
-                output = result.stdout + result.stderr
+                output = stdout + stderr
                 updates_found = any(keyword in output.lower() for keyword in [
                     'pulling', 'downloaded', 'pull complete', 'status: downloaded newer image'
                 ])
                 
-                print(output)
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
                 
                 if updates_found:
@@ -957,17 +979,13 @@ def docker_compose_pull(auto_yes=False):
                 else:
                     print("ℹ️  No updates found, containers not restarted")
                 
-            except subprocess.CalledProcessError as e:
-                print(f"❌ Docker-compose pull failed in {compose_path} with exit code {e.returncode}")
-                if e.stdout:
-                    print("STDOUT:", e.stdout)
-                if e.stderr:
-                    print("STDERR:", e.stderr)
-                overall_success = False
-            except FileNotFoundError:
-                print("❌ docker-compose command not found")
-                overall_success = False
-                
+        except FileNotFoundError:
+            print("❌ docker-compose command not found")
+            overall_success = False
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            overall_success = False
+            
         finally:
             os.chdir(original_cwd)
     
@@ -1223,7 +1241,6 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             elif os_type in ['fedora', 'rhel']:
                 if run_command(['sudo', 'dnf', 'upgrade'], f"Updating {os_type.capitalize()} packages", auto_yes):
                     success_count += 1
-                check_fedora_restart_needs(auto_yes, service_restart=args.service_restart)
         # Other Linux tasks
         linux_tasks = [
             (refresh_snaps, not args.skip_snap, auto_yes),
@@ -1260,6 +1277,10 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             total_tasks += 1
             if docker_system_prune(auto_yes):
                 success_count += 1
+
+    # Check for service restarts at the very end
+    if os_type in ['fedora', 'rhel']:
+        check_fedora_restart_needs(auto_yes, service_restart=args.service_restart)
 
     # Pending actions summary
     if pending_actions:
