@@ -13,9 +13,10 @@ import json
 from pathlib import Path
 import time
 import itertools
+import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 # Global list to store pending actions
 pending_actions = []
@@ -940,23 +941,44 @@ def docker_compose_pull(auto_yes=False):
             print(f"Command: docker-compose pull")
             print(f"{'='*50}")
             
-            spinner = itertools.cycle(['-', '/', '|', '\\'])
             process = subprocess.Popen(['docker-compose', 'pull'], 
                                        stdout=subprocess.PIPE, 
                                        stderr=subprocess.PIPE, 
                                        text=True)
             
+            # --- Corrected Spinner and Non-Blocking Read ---
+            stdout_output = []
+            stderr_output = []
+
+            def stream_reader(stream, output_list):
+                for line in iter(stream.readline, ''):
+                    output_list.append(line)
+                stream.close()
+
+            stdout_thread = threading.Thread(target=stream_reader, args=(process.stdout, stdout_output))
+            stderr_thread = threading.Thread(target=stream_reader, args=(process.stderr, stderr_output))
+            stdout_thread.start()
+            stderr_thread.start()
+
+            spinner = itertools.cycle(['-', '/', '|', '\\'])
             while process.poll() is None:
                 sys.stdout.write(f"\r{next(spinner)} Pulling images...")
                 sys.stdout.flush()
                 time.sleep(0.1)
+
+            stdout_thread.join()
+            stderr_thread.join()
             
-            sys.stdout.write("\r") # Clear the spinner
-            
-            stdout, stderr = process.communicate()
-            
-            if process.returncode != 0:
-                print(f"❌ Docker-compose pull failed in {compose_path} with exit code {process.returncode}")
+            sys.stdout.write("\r" + " " * 20 + "\r") # Clear spinner line
+            sys.stdout.flush()
+
+            return_code = process.returncode
+            stdout = "".join(stdout_output)
+            stderr = "".join(stderr_output)
+            # --- End of Correction ---
+
+            if return_code != 0:
+                print(f"❌ Docker-compose pull failed in {compose_path} with exit code {return_code}")
                 if stdout:
                     print("STDOUT:", stdout)
                 if stderr:
