@@ -16,7 +16,7 @@ import itertools
 import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 # Global list to store pending actions
 pending_actions = []
@@ -992,12 +992,30 @@ def docker_compose_pull(auto_yes=False):
                 ])
                 
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
-                
+
                 if updates_found:
-                    print("🔄 Updates detected, restarting containers...")
-                    restart_result = subprocess.run(['docker-compose', 'up', '-d'], 
-                                                  check=True, capture_output=False)
-                    print("✅ Containers restarted successfully")
+                    print("🔄 Updates detected, bringing stack down to clean up orphaned containers...")
+                    down_result = subprocess.run(
+                        ['docker-compose', 'down'],
+                        check=False,
+                        capture_output=False
+                    )
+                    if down_result.returncode != 0:
+                        print(f"⚠️  docker-compose down exited with code {down_result.returncode}, attempting up anyway...")
+                        failures.append(f"docker-compose down failed in {compose_path} with exit code {down_result.returncode}")
+
+                    print("🔄 Bringing stack back up...")
+                    up_result = subprocess.run(
+                        ['docker-compose', 'up', '-d'],
+                        check=False,
+                        capture_output=False
+                    )
+                    if up_result.returncode == 0:
+                        print("✅ Containers restarted successfully")
+                    else:
+                        print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
+                        failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
+                        overall_success = False
                 else:
                     print("ℹ️  No updates found, containers not restarted")
                 
