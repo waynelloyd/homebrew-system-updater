@@ -86,13 +86,26 @@ A comprehensive cross-platform system update script that handles package managem
 - **Docker**: Compose pull/restart + system prune
 
 ---
-
 ## Docker Operations (All Platforms)
 
 ### Docker Compose (searches ~/ directory and prompts to add compose.yml)
 - **Smart Pull**: `docker-compose pull` with update detection
-- **Conditional Restart**: `docker-compose up -d` only if updates found
+- **Conditional Restart**: Only restarts containers when updates are detected
 - **Update Detection**: Scans pull output for actual image updates
+
+### Restart Behaviour
+When container image updates are detected the script handles restarts differently depending on the container runtime:
+
+- **Docker**: Runs `docker-compose up -d` directly
+- **Podman**: Runs `docker-compose down` first, then `docker-compose up -d`
+
+The `down` step is required for Podman compatibility when using `network_mode: service:` 
+between containers (e.g. routing traffic through a VPN container like Gluetun). Without 
+it, Podman leaves orphaned stopped containers behind which block recreation of dependent 
+containers.
+
+> ⚠️ **Note:** On Podman, all containers will briefly go offline during updates. 
+> If you require zero-downtime updates this behaviour may not suit your setup.
 
 ### Docker Maintenance
 - **System Cleanup**: `docker system prune -a` with auto-confirmation
@@ -342,3 +355,10 @@ Tasks completed successfully: 10/11
 ## License
 
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
+
+## Changelog
+
+### v1.0.8
+- Fixed: Use `docker-compose down` before `up -d` on Podman to clean up orphaned containers
+- Added: `is_podman()` detection — only performs `down` step when Podman is detected
+- Improved: Error handling for docker-compose restart failures

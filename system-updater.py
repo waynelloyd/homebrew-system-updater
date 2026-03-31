@@ -50,6 +50,15 @@ def run_command(command, description, auto_yes=False):
         failures.append(msg)
         return False
 
+def is_podman():
+    """Detect if docker command is actually Podman compatibility layer"""
+    try:
+        result = subprocess.run(['docker', '--version'],
+                               check=True, capture_output=True, text=True)
+        return 'podman' in result.stdout.lower()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    
 def get_config_file():
     """Get the path to the configuration file"""
     config_dir = Path.home() / '.config' / 'system-updater'
@@ -994,15 +1003,20 @@ def docker_compose_pull(auto_yes=False):
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:
-                    print("🔄 Updates detected, bringing stack down to clean up orphaned containers...")
-                    down_result = subprocess.run(
-                        ['docker-compose', 'down'],
-                        check=False,
-                        capture_output=False
-                    )
-                    if down_result.returncode != 0:
-                        print(f"⚠️  docker-compose down exited with code {down_result.returncode}, attempting up anyway...")
-                        failures.append(f"docker-compose down failed in {compose_path} with exit code {down_result.returncode}")
+                    if is_podman():
+                        # Podman leaves orphaned containers behind when using
+                        # network_mode: service: so we need to down first
+                        print("🔄 Updates detected (Podman detected), bringing stack down to clean up orphaned containers...")
+                        down_result = subprocess.run(
+                            ['docker-compose', 'down'],
+                            check=False,
+                            capture_output=False
+                        )
+                        if down_result.returncode != 0:
+                            print(f"⚠️  docker-compose down exited with code {down_result.returncode}, attempting up anyway...")
+                            failures.append(f"docker-compose down failed in {compose_path} with exit code {down_result.returncode}")
+                    else:
+                        print("🔄 Updates detected, restarting containers...")
 
                     print("🔄 Bringing stack back up...")
                     up_result = subprocess.run(
@@ -1018,7 +1032,6 @@ def docker_compose_pull(auto_yes=False):
                         overall_success = False
                 else:
                     print("ℹ️  No updates found, containers not restarted")
-                
         except FileNotFoundError:
             print("❌ docker-compose command not found")
             overall_success = False
