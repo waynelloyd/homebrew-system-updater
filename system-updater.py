@@ -996,8 +996,11 @@ def docker_compose_pull(auto_yes=False):
             else:
                 # Check if any images were actually pulled (updated)
                 output = stdout + stderr
+                #print(f"DEBUG pull output: {output[:2000]}")
                 updates_found = any(keyword in output.lower() for keyword in [
-                    'pulling', 'downloaded', 'pull complete', 'status: downloaded newer image'
+                    'pulled',                       # Podman
+                    'downloaded newer image',       # Docker
+                    'status: downloaded newer image' # Docker alternate
                 ])
                 
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
