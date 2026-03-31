@@ -362,3 +362,5 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 - Fixed: Use `docker-compose down` before `up -d` on Podman to clean up orphaned containers
 - Added: `is_podman()` detection — only performs `down` step when Podman is detected
 - Improved: Error handling for docker-compose restart failures
+- Improved: Tightened update detection keywords to avoid false positives
+- Added: Summary of updated container images printed at end of run

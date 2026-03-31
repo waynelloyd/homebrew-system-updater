@@ -921,6 +921,7 @@ def docker_compose_pull(auto_yes=False):
         return True
     
     overall_success = True
+    updated_images = []
     
     for path_str in valid_paths:
         compose_path = Path(path_str)
@@ -997,12 +998,27 @@ def docker_compose_pull(auto_yes=False):
                 # Check if any images were actually pulled (updated)
                 output = stdout + stderr
                 #print(f"DEBUG pull output: {output[:2000]}")
-                updates_found = any(keyword in output.lower() for keyword in [
-                    'pulled',                       # Podman
-                    'downloaded newer image',       # Docker
-                    'status: downloaded newer image' # Docker alternate
-                ])
-                
+                updates_found = any(
+                    (line.strip().startswith('Image ') and line.strip().endswith(' Pulled'))  # Podman
+                    or 'downloaded newer image' in line.lower()  # Docker
+                    for line in output.splitlines()
+                )
+
+                # Extract which images were actually updated
+                if updates_found:
+                    for line in output.splitlines():
+                        line = line.strip()
+                    if line.startswith('Image ') and line.endswith(' Pulled'):
+                    # Podman: "Image ghcr.io/qdm12/gluetun Pulled"
+                        image_name = line[6:-7].strip()
+                        updated_images.append(image_name)
+                    elif 'downloaded newer image for' in line.lower():
+                        # Docker: "Status: Downloaded newer image for ghcr.io/qdm12/gluetun:latest"
+                        parts = line.lower().split('downloaded newer image for')
+                        if len(parts) > 1:
+                            image_name = parts[1].strip()
+                            updated_images.append(image_name)
+
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:
@@ -1044,7 +1060,15 @@ def docker_compose_pull(auto_yes=False):
             
         finally:
             os.chdir(original_cwd)
-    
+
+        # Print summary of updated images
+        if updated_images:
+            print(f"\n{'='*50}")
+            print("🐳 UPDATED CONTAINERS")
+            print(f"{'='*50}")
+            for image in updated_images:
+                print(f"  - {image}")
+
     return overall_success
 
 def docker_system_prune(auto_yes=False):
