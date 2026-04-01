@@ -94,21 +94,22 @@ A comprehensive cross-platform system update script that handles package managem
 - **Update Detection**: Scans pull output for actual image updates
 
 ### Restart Behaviour
-When container image updates are detected the script handles restarts differently depending on the container runtime:
+When container image updates are detected the script performs a targeted restart:
 
-- **Docker**: Runs `docker-compose up -d` directly
-- **Podman**: Runs `docker-compose down` first, then `docker-compose up -d`
+1. Parses the `docker-compose.yml` to build a dependency graph
+2. Identifies which containers use the updated images
+3. Walks the dependency graph to find all affected dependents
+4. Stops only those containers in reverse dependency order
+5. Runs `docker-compose up -d` to bring everything back up in the correct order with full health check awareness
 
-The `down` step is required for Podman compatibility when using `network_mode: service:` 
-between containers (e.g. routing traffic through a VPN container like Gluetun). Without 
-it, Podman leaves orphaned stopped containers behind which block recreation of dependent 
-containers.
+This means unrelated containers are never restarted, minimising downtime.
 
-> ⚠️ **Note:** On Podman, all containers will briefly go offline during updates. 
-> If you require zero-downtime updates this behaviour may not suit your setup.
+If the compose file cannot be parsed, the script falls back to a full stack restart automatically.
+
+> ℹ️ **Note:** PyYAML is required for dependency graph parsing (`pip3 install pyyaml`). It is available by default on most systems.
 
 ### Docker Maintenance
-- **System Cleanup**: `docker system prune -a` with auto-confirmation
+- **System Cleanup**: `docker system prune` with auto-confirmation (dangling images only — layer cache is preserved to ensure accurate update detection on subsequent runs)
 
 ---
 
@@ -357,6 +358,18 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.0
+- Added: Targeted container restart — only stops containers affected by updates and their dependents, leaving unrelated containers running
+- Added: Compose file dependency graph parser using PyYAML to determine restart scope
+- Added: `network_mode: container:` awareness in dependency graph. podman-docker comptibility doesn't handle this well 
+- Added: Live pull progress output — shows which images are downloading with spinner between updates
+- Fixed: Image update detection now tracks layer-level activity (`Pulling fs layer`) rather than matching `Image ... Pulled` which fired for all checked images
+- Fixed: Duplicate image entries in updated containers summary caused by thread race condition
+- Fixed: Garbled Podman terminal output during pull by setting `TERM=dumb` and `NO_COLOR=1`
+- Fixed: stdout and stderr both being parsed for pull progress causing duplicate detections — stdout now uses a plain reader
+- Changed: `docker system prune -a` replaced with `docker system prune` to preserve image layer cache and prevent false positive update detection on consecutive runs
+- Changed: Restart logic no longer requires full `docker-compose down` — targeted stop followed by `docker-compose up -d` handles all runtimes including Podman
 
 ### v1.0.8
 - Fixed: Use `docker-compose down` before `up -d` on Podman to clean up orphaned containers

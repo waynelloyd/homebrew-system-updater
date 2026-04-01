@@ -16,7 +16,7 @@ import itertools
 import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.0.8"
+__version__ = "1.1.0"
 
 # Global list to store pending actions
 pending_actions = []
@@ -890,6 +890,117 @@ def update_firmware(auto_yes=False, apply_firmware=False):
         print(f"⚠️  An error occurred while checking or applying firmware updates: {e}")
         return False
 
+def build_restart_targets(updated_images, compose_path):
+    """Given a list of updated image names, return an ordered list of containers to restart."""
+    import yaml
+
+    # Find compose file
+    compose_file = None
+    for name in ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']:
+        candidate = compose_path / name
+        if candidate.exists():
+            compose_file = candidate
+            break
+
+    if not compose_file:
+        return None  # Fall back to full restart
+
+    with open(compose_file, 'r') as f:
+        compose = yaml.safe_load(f)
+
+    services = compose.get('services', {})
+
+    # Build image -> container name map
+    image_to_container = {}
+    for svc_name, svc in services.items():
+        image = svc.get('image', '')
+        container = svc.get('container_name', svc_name)
+        # Strip tag for matching (e.g. nextcloud:fpm -> nextcloud:fpm kept as-is)
+        image_to_container[image] = container
+
+    # Build dependency graph: container -> set of containers that depend on it
+    dependents = {svc.get('container_name', name): set() for name, svc in services.items()}
+    container_to_svc = {svc.get('container_name', name): name for name, svc in services.items()}
+
+    for svc_name, svc in services.items():
+        container = svc.get('container_name', svc_name)
+        for dep_svc in svc.get('depends_on', {}).keys():
+            dep_container = services[dep_svc].get('container_name', dep_svc)
+            dependents[dep_container].add(container)
+
+    # Also handle network_mode: container:<name>
+    for svc_name, svc in services.items():
+        container = svc.get('container_name', svc_name)
+        network_mode = svc.get('network_mode', '')
+        if network_mode.startswith('container:'):
+            parent = network_mode.split('container:')[1]
+            dependents[parent].add(container)
+
+    def get_all_dependents(container, visited=None):
+        """Recursively get all containers that depend on this one."""
+        if visited is None:
+            visited = set()
+        if container in visited:
+            return visited
+        visited.add(container)
+        for dep in dependents.get(container, set()):
+            get_all_dependents(dep, visited)
+        return visited
+
+    # Find which containers need restarting
+    containers_to_restart = set()
+    for image in updated_images:
+        # Match image name (handle tags)
+        matched_container = None
+        for img, container in image_to_container.items():
+            if img == image or img.split(':')[0] == image.split(':')[0]:
+                matched_container = container
+                break
+
+        if matched_container:
+            affected = get_all_dependents(matched_container)
+            containers_to_restart.update(affected)
+
+    if not containers_to_restart:
+        return []
+
+    # Order by dependency: start with containers that have no dependencies first
+    def get_start_order(containers):
+        """Topological sort of containers to get correct start order."""
+        # Build local dep map for just these containers
+        result = []
+        remaining = set(containers)
+        svc_depends = {}
+        for c in containers:
+            svc_name = container_to_svc.get(c, c)
+            svc = services.get(svc_name, {})
+            deps = set()
+            for dep_svc in svc.get('depends_on', {}).keys():
+                dep_container = services[dep_svc].get('container_name', dep_svc)
+                if dep_container in containers:
+                    deps.add(dep_container)
+            network_mode = svc.get('network_mode', '')
+            if network_mode.startswith('container:'):
+                parent = network_mode.split('container:')[1]
+                if parent in containers:
+                    deps.add(parent)
+            svc_depends[c] = deps
+
+        while remaining:
+            # Find containers whose dependencies are all already in result
+            ready = {c for c in remaining if svc_depends[c].issubset(set(result))}
+            if not ready:
+                # Cycle or unresolved, just add remaining as-is
+                result.extend(remaining)
+                break
+            result.extend(sorted(ready))
+            remaining -= ready
+
+        return result
+
+    ordered = get_start_order(containers_to_restart)
+    return ordered
+
 def docker_compose_pull(auto_yes=False):
     """Pull docker-compose images in configured directories and restart if updates found"""
     config = load_config()
@@ -954,13 +1065,38 @@ def docker_compose_pull(auto_yes=False):
             process = subprocess.Popen(['docker-compose', 'pull'], 
                                        stdout=subprocess.PIPE, 
                                        stderr=subprocess.PIPE, 
-                                       text=True)
+                                       text=True,
+                                       env={**os.environ, 'TERM': 'dumb', 'NO_COLOR': '1'})
             
             # --- Corrected Spinner and Non-Blocking Read ---
             stdout_output = []
             stderr_output = []
 
+            current_image = [None]  # mutable container so inner function can write to it
+            downloading_images = set()
+
             def stream_reader(stream, output_list):
+                for line in iter(stream.readline, ''):
+                    output_list.append(line)
+                    stripped = line.strip()
+                    if stripped.startswith('Image ') and stripped.endswith(' Pulling'):
+                        current_image[0] = stripped[6:-8].strip()
+                    elif 'Pulling fs layer' in stripped and current_image[0]:
+                        image = current_image[0]
+                        if image not in downloading_images and image not in updated_images:
+                            downloading_images.add(image)
+                            sys.stdout.write("\r" + " " * 30 + "\r")
+                            print(f"  ⬇️  Downloading update for {image}...")
+                    elif stripped.startswith('Image ') and stripped.endswith(' Pulled'):
+                        image_name = stripped[6:-7].strip()
+                        if image_name in downloading_images:
+                            downloading_images.discard(image_name)
+                            sys.stdout.write("\r" + " " * 30 + "\r")
+                            print(f"  ✅ {image_name}")
+                            updated_images.append(image_name)                
+                stream.close()
+
+            def plain_reader(stream, output_list):
                 for line in iter(stream.readline, ''):
                     output_list.append(line)
                 stream.close()
@@ -1004,53 +1140,70 @@ def docker_compose_pull(auto_yes=False):
                     for line in output.splitlines()
                 )
 
-                # Extract which images were actually updated
-                if updates_found:
-                    for line in output.splitlines():
-                        line = line.strip()
-                    if line.startswith('Image ') and line.endswith(' Pulled'):
-                    # Podman: "Image ghcr.io/qdm12/gluetun Pulled"
-                        image_name = line[6:-7].strip()
-                        updated_images.append(image_name)
+                # Track which images actually downloaded new layers
+                images_with_new_layers = set()
+                current_image = None
+
+                for line in output.splitlines():
+                    line = line.strip()
+                    if line.startswith('Image ') and line.endswith(' Pulling'):
+                        current_image = line[6:-8].strip()
+                    elif current_image and ('Pulling fs layer' in line or 'Pull complete' in line or 'Verifying Checksum' in line):
+                        images_with_new_layers.add(current_image)
                     elif 'downloaded newer image for' in line.lower():
-                        # Docker: "Status: Downloaded newer image for ghcr.io/qdm12/gluetun:latest"
+                        # Docker fallback
                         parts = line.lower().split('downloaded newer image for')
                         if len(parts) > 1:
-                            image_name = parts[1].strip()
-                            updated_images.append(image_name)
+                            images_with_new_layers.add(parts[1].strip())
+
+                updated_images.extend(images_with_new_layers)
+                updates_found = len(images_with_new_layers) > 0
 
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:
-                    if is_podman():
-                        # Podman leaves orphaned containers behind when using
-                        # network_mode: service: so we need to down first
-                        print("🔄 Updates detected (Podman detected), bringing stack down to clean up orphaned containers...")
-                        down_result = subprocess.run(
-                            ['docker-compose', 'down'],
-                            check=False,
-                            capture_output=False
-                        )
-                        if down_result.returncode != 0:
-                            print(f"⚠️  docker-compose down exited with code {down_result.returncode}, attempting up anyway...")
-                            failures.append(f"docker-compose down failed in {compose_path} with exit code {down_result.returncode}")
-                    else:
-                        print("🔄 Updates detected, restarting containers...")
+                    restart_targets = build_restart_targets(updated_images, compose_path)
 
-                    print("🔄 Bringing stack back up...")
-                    up_result = subprocess.run(
-                        ['docker-compose', 'up', '-d'],
-                        check=False,
-                        capture_output=False
-                    )
-                    if up_result.returncode == 0:
-                        print("✅ Containers restarted successfully")
+                    if restart_targets is None:
+                        # Could not parse compose file, fall back to full restart
+                        print("⚠️  Could not parse compose file, falling back to full stack restart...")
+                        restart_targets = None
+
+                    if restart_targets is not None and len(restart_targets) > 0:
+                        print(f"🔄 Stopping {len(restart_targets)} affected container(s): {', '.join(restart_targets)}")
+                        # Stop in reverse order
+                        for container in reversed(restart_targets):
+                            print(f"  ⏹️  Stopping {container}...")
+                            subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
+                        # Let compose bring everything back up in the right order
+                        print("🔄 Bringing stack back up...")
+                        up_result = subprocess.run(
+                            ['docker-compose', 'up', '-d'],
+                            check=False, capture_output=False
+                        )
+                        if up_result.returncode == 0:
+                            print("✅ Containers restarted successfully")
+                        else:
+                            print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
+                            failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
+                            overall_success = False
+                    elif restart_targets is not None and len(restart_targets) == 0:
+                        print("⚠️  Updates found but no matching containers identified, falling back to full restart...")
+                        subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
+                        subprocess.run(['docker-compose', 'up', '-d'], check=False, capture_output=False)
                     else:
-                        print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
-                        failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
-                        overall_success = False
+                        # Full restart fallback
+                        print("🔄 Updates detected, performing full stack restart...")
+                        subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
+                        up_result = subprocess.run(['docker-compose', 'up', '-d'], check=False, capture_output=False)
+                        if up_result.returncode == 0:
+                            print("✅ Containers restarted successfully")
+                        else:
+                            failures.append(f"docker-compose up failed in {compose_path}")
+                            overall_success = False
                 else:
                     print("ℹ️  No updates found, containers not restarted")
+
         except FileNotFoundError:
             print("❌ docker-compose command not found")
             overall_success = False
@@ -1066,7 +1219,7 @@ def docker_compose_pull(auto_yes=False):
             print(f"\n{'='*50}")
             print("🐳 UPDATED CONTAINERS")
             print(f"{'='*50}")
-            for image in updated_images:
+            for image in dict.fromkeys(updated_images):  # deduplicate preserving order
                 print(f"  - {image}")
 
     return overall_success
@@ -1079,11 +1232,11 @@ def docker_system_prune(auto_yes=False):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
     
-    command = ['docker', 'system', 'prune', '-a']
+    command = ['docker', 'system', 'prune']
     if auto_yes:
         command.append('-f')  # Force, don't prompt for confirmation
     
-    return run_command(command, "Cleaning up Docker system (prune -a)", auto_yes)
+    return run_command(command, "Cleaning up Docker system (prune)", auto_yes)
 
 def config_get_bool(config, *keys, default=False):
     """Return a boolean from the config for any of the provided keys.
