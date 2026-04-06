@@ -16,7 +16,7 @@ import itertools
 import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 # Global list to store pending actions
 pending_actions = []
@@ -1061,7 +1061,26 @@ def docker_compose_pull(auto_yes=False):
             print(f"Running: Pulling docker-compose images in {compose_path}")
             print(f"Command: docker-compose pull")
             print(f"{'='*50}")
-            
+           
+            # Snapshot image IDs before pull to detect changes
+            pre_pull_digests = {}
+            try:
+                images_result = subprocess.run(
+                    ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}=={{.ID}}'],
+                    capture_output=True, text=True, check=False
+                )
+                for line in images_result.stdout.splitlines():
+                    if '==' not in line:
+                        continue
+                    name, digest = line.split('==', 1)
+                    name = name.strip().replace('docker.io/library/', 'docker.io/')
+                    digest = digest.strip()
+                    if '<none>' in name:
+                        # Use repository only as key for digest-pinned images
+                        name = name.split(':')[0]
+                    pre_pull_digests[name] = digest
+            except Exception:
+                pass
             process = subprocess.Popen(['docker-compose', 'pull'], 
                                        stdout=subprocess.PIPE, 
                                        stderr=subprocess.PIPE, 
@@ -1072,35 +1091,11 @@ def docker_compose_pull(auto_yes=False):
             stdout_output = []
             stderr_output = []
 
-            current_image = [None]  # mutable container so inner function can write to it
-            downloading_images = set()
-
             def stream_reader(stream, output_list):
                 for line in iter(stream.readline, ''):
                     output_list.append(line)
-                    stripped = line.strip()
-                    if stripped.startswith('Image ') and stripped.endswith(' Pulling'):
-                        current_image[0] = stripped[6:-8].strip()
-                    elif 'Pulling fs layer' in stripped and current_image[0]:
-                        image = current_image[0]
-                        if image not in downloading_images and image not in updated_images:
-                            downloading_images.add(image)
-                            sys.stdout.write("\r" + " " * 30 + "\r")
-                            print(f"  ⬇️  Downloading update for {image}...")
-                    elif stripped.startswith('Image ') and stripped.endswith(' Pulled'):
-                        image_name = stripped[6:-7].strip()
-                        if image_name in downloading_images:
-                            downloading_images.discard(image_name)
-                            sys.stdout.write("\r" + " " * 30 + "\r")
-                            print(f"  ✅ {image_name}")
-                            updated_images.append(image_name)                
                 stream.close()
-
-            def plain_reader(stream, output_list):
-                for line in iter(stream.readline, ''):
-                    output_list.append(line)
-                stream.close()
-
+                
             stdout_thread = threading.Thread(target=stream_reader, args=(process.stdout, stdout_output))
             stderr_thread = threading.Thread(target=stream_reader, args=(process.stderr, stderr_output))
             stdout_thread.start()
@@ -1131,34 +1126,37 @@ def docker_compose_pull(auto_yes=False):
                     print("STDERR:", stderr)
                 overall_success = False
             else:
-                # Check if any images were actually pulled (updated)
-                output = stdout + stderr
-                #print(f"DEBUG pull output: {output[:2000]}")
-                updates_found = any(
-                    (line.strip().startswith('Image ') and line.strip().endswith(' Pulled'))  # Podman
-                    or 'downloaded newer image' in line.lower()  # Docker
-                    for line in output.splitlines()
-                )
+                # Compare image IDs after pull to find what actually changed
+                try:
+                    images_result = subprocess.run(
+                        ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}=={{.ID}}'],
+                        capture_output=True, text=True, check=False
+                    )
+                    post_pull_digests = {}
+                    for line in images_result.stdout.splitlines():
+                        if '==' not in line:
+                            continue
+                        name, digest = line.split('==', 1)
+                        name = name.strip().replace('docker.io/library/', 'docker.io/')
+                        digest = digest.strip()
+                        if '<none>' in name:
+                            name = name.split(':')[0]
+                        post_pull_digests[name] = digest
 
-                # Track which images actually downloaded new layers
-                images_with_new_layers = set()
-                current_image = None
+                    for name, digest in post_pull_digests.items():
+                        if name in pre_pull_digests and pre_pull_digests[name] != digest:
+                            updated_images.append(name)
+                        elif name not in pre_pull_digests:
+                            updated_images.append(name)
 
-                for line in output.splitlines():
-                    line = line.strip()
-                    if line.startswith('Image ') and line.endswith(' Pulling'):
-                        current_image = line[6:-8].strip()
-                    elif current_image and ('Pulling fs layer' in line or 'Pull complete' in line or 'Verifying Checksum' in line):
-                        images_with_new_layers.add(current_image)
-                    elif 'downloaded newer image for' in line.lower():
-                        # Docker fallback
-                        parts = line.lower().split('downloaded newer image for')
-                        if len(parts) > 1:
-                            images_with_new_layers.add(parts[1].strip())
+                    # Print confirmed updates
+                    for image in updated_images:
+                        print(f"  ✅ {image}")
 
-                updated_images.extend(images_with_new_layers)
-                updates_found = len(images_with_new_layers) > 0
+                except Exception as e:
+                    print(f"⚠️  Could not compare image digests: {e}")
 
+                updates_found = len(updated_images) > 0
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:

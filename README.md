@@ -359,6 +359,14 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.1
+- Fixed: Image update detection completely reworked — now uses pre/post pull image ID comparison via `docker images` instead of parsing Podman pull output, eliminating false positives on every run
+- Fixed: Digest-pinned images (e.g. containers with `@sha256:` tag) now tracked correctly by stripping `<none>` tags and using repository name as key
+- Fixed: `docker.io/library/` prefix normalised so official Docker Hub images (nginx, redis, postgres etc.) are compared correctly
+- Fixed: Removed unreliable `Pulling fs layer` based live progress tracking which caused duplicate download messages due to parallel pull interleaving
+- Simplified: `stream_reader` and `plain_reader` merged into single function since progress tracking moved to digest comparison
+- Simplified: `downloading_images` and `current_image` tracking removed as no longer needed
+
 ### v1.1.0
 - Added: Targeted container restart — only stops containers affected by updates and their dependents, leaving unrelated containers running
 - Added: Compose file dependency graph parser using PyYAML to determine restart scope
