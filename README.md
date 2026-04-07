@@ -359,6 +359,9 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.2
+- Fixed: Digest-pinned images with `@sha256:` references (e.g. immich-app/postgres) no longer appear as `<none>` in the updated containers list or trigger false restarts
+
 ### v1.1.1
 - Fixed: Image update detection completely reworked — now uses pre/post pull image ID comparison via `docker images` instead of parsing Podman pull output, eliminating false positives on every run
 - Fixed: Digest-pinned images (e.g. containers with `@sha256:` tag) now tracked correctly by stripping `<none>` tags and using repository name as key

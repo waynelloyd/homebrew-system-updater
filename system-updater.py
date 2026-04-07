@@ -16,7 +16,7 @@ import itertools
 import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 # Global list to store pending actions
 pending_actions = []
@@ -1144,6 +1144,8 @@ def docker_compose_pull(auto_yes=False):
                         post_pull_digests[name] = digest
 
                     for name, digest in post_pull_digests.items():
+                        if '<none>' in name:
+                            continue
                         if name in pre_pull_digests and pre_pull_digests[name] != digest:
                             updated_images.append(name)
                         elif name not in pre_pull_digests:
@@ -1151,7 +1153,8 @@ def docker_compose_pull(auto_yes=False):
 
                     # Print confirmed updates
                     for image in updated_images:
-                        print(f"  ✅ {image}")
+                        if '<none>' not in image:
+                            print(f"  ✅ {image}")
 
                 except Exception as e:
                     print(f"⚠️  Could not compare image digests: {e}")
