@@ -206,5 +206,11 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# JetBrains Copilot plugin noise
-.idea/copilot*.xml
+# IntelliJ project files to keep
+!.idea/misc.xml
+!.idea/modules.xml
+!.idea/vcs.xml
+!.idea/*.iml
+
+# Ignore everything else
+.idea/*
