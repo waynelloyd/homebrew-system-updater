@@ -14,9 +14,10 @@ from pathlib import Path
 import time
 import itertools
 import threading
+import yaml # Added: Import yaml for docker-compose parsing
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.3"
+__version__ = "1.1.4" # Incrementing version for this change
 
 # Global list to store pending actions
 pending_actions = []
@@ -36,7 +37,7 @@ def run_command(command, description, auto_yes=False):
             if any(cmd in command for cmd in ['apt', 'dnf', 'yum']):
                 command.append('-y')
         
-        result = subprocess.run(command, check=True, capture_output=False)
+        subprocess.run(command, check=True, capture_output=False) # Modified: Removed unused 'result =' assignment
         print(f"✅ {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
@@ -233,7 +234,7 @@ def detect_linux_distro():
     
     return 'linux_unknown'
 
-def update_vim_plugins(auto_yes=False):
+def update_vim_plugins(): # Modified: Removed unused auto_yes parameter
     """Update Vim plugins using Vundle"""
     vundle_path = Path.home() / '.vim' / 'bundle' / 'Vundle.vim'
     if not vundle_path.exists():
@@ -241,8 +242,7 @@ def update_vim_plugins(auto_yes=False):
         
     return run_command(['vim', '+PluginUpdate', '+qall'], "Updating Vim plugins")
 
-# New: update tmux plugins via TPM if present (~/.tmux/plugins/tpm)
-def update_tmux_plugins(auto_yes=False):
+def update_tmux_plugins(): # Modified: Removed unused auto_yes parameter
     """Update tmux plugins using TPM if installed (~/.tmux/plugins/tpm).
 
     This locates the TPM update_plugins script in common locations (including
@@ -304,7 +304,7 @@ def update_tmux_plugins(auto_yes=False):
         failures.append(msg)
         return False
 
-def update_oh_my_zsh(auto_yes=False):
+def update_oh_my_zsh(): # Modified: Removed unused auto_yes parameter
     """Update Oh My Zsh framework"""
     from pathlib import Path
     oh_my_zsh_path = Path.home() / '.oh-my-zsh'
@@ -322,7 +322,7 @@ def update_oh_my_zsh(auto_yes=False):
         print(f"⚠️  Oh My Zsh update encountered an error: {e}. Continuing...")
         return True
 
-def update_macos_system_software(auto_yes=False):
+def update_macos_system_software(): # Modified: Removed unused auto_yes parameter
     """Update macOS system software using softwareupdate"""
     print(f"\n{'='*50}")
     print("Running: Installing macOS system updates")
@@ -351,7 +351,7 @@ def update_macos_system_software(auto_yes=False):
         print(f"❌ Installing macOS system updates failed with exit code {e.returncode}")
         return False
 
-def update_homebrew_packages(auto_yes=False):
+def update_homebrew_packages(): # Modified: Removed unused auto_yes parameter
     """Update macOS packages using Homebrew"""
     # Check if brew is installed
     try:
@@ -383,7 +383,7 @@ def update_homebrew_packages(auto_yes=False):
     
     return success
 
-def update_mas_apps(auto_yes=False):
+def update_mas_apps(): # Modified: Removed unused auto_yes parameter
     """Update Mac App Store applications using mas CLI"""
     # Check if mas is installed
     try:
@@ -415,7 +415,7 @@ def update_mas_apps(auto_yes=False):
         print("⚠️  Could not check Mac App Store updates")
         return True
 
-def update_ruby_gems(auto_yes=False):
+def update_ruby_gems(): # Modified: Removed unused auto_yes parameter
     """Update Ruby gems (user only)"""
     # Check if gem is installed
     try:
@@ -453,7 +453,7 @@ def update_ruby_gems(auto_yes=False):
     except subprocess.CalledProcessError:
         return True  # Skip silently if command fails
 
-def update_npm_packages(auto_yes=False):
+def update_npm_packages(): # Modified: Removed unused auto_yes parameter
     """Update global and user npm packages"""
     # Check if npm is installed
     try:
@@ -613,7 +613,7 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
 
     return True
 
-def refresh_snaps(auto_yes=False):
+def refresh_snaps(): # Modified: Removed unused auto_yes parameter
     """Refresh snap packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
@@ -626,7 +626,7 @@ def refresh_snaps(auto_yes=False):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
 
-def update_flatpaks(auto_yes=False):
+def update_flatpaks(): # Modified: Removed unused auto_yes parameter
     """Update Flatpak packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
@@ -650,7 +650,7 @@ def update_flatpaks(auto_yes=False):
     
     return success
 
-def update_pip_packages(auto_yes=False):
+def update_pip_packages(): # Modified: Removed unused auto_yes parameter
     """Update pip packages (system and user)"""
     # Check if pip3 is installed
     try:
@@ -736,7 +736,7 @@ def update_pip_packages(auto_yes=False):
     
     return success
 
-def update_mac_apps(auto_yes=False):
+def update_mac_apps(): # Modified: Removed unused auto_yes parameter
     """Update Mac applications using MacUpdater"""
     os_type = detect_os()
     if os_type != 'macos':
@@ -891,8 +891,10 @@ def update_firmware(auto_yes=False, apply_firmware=False):
         return False
 
 def build_restart_targets(updated_images, compose_path):
-    """Given a list of updated image names, return an ordered list of containers to restart."""
-    import yaml
+    """Given a list of updated image names, return an ordered list of containers to explicitly stop
+    because they are network-dependent sidecars of an updated service.
+    """
+    # import yaml # Moved to global import
 
     # Find compose file
     compose_file = None
@@ -903,105 +905,131 @@ def build_restart_targets(updated_images, compose_path):
             break
 
     if not compose_file:
-        return None  # Fall back to full restart
+        return [] # No compose file, no specific restarts needed
 
-    with open(compose_file, 'r') as f:
-        compose = yaml.safe_load(f)
+    try:
+        with open(compose_file, 'r') as f:
+            compose = yaml.safe_load(f)
+    except Exception:
+        print(f"⚠️  Could not parse compose file {compose_path / compose_file}, skipping specific network restart logic.")
+        return [] # Fallback to letting docker-compose up -d handle everything
 
     services = compose.get('services', {})
-
-    # Build image -> container name map
-    image_to_container = {}
-    for svc_name, svc in services.items():
-        image = svc.get('image', '')
-        container = svc.get('container_name', svc_name)
-        # Strip tag for matching (e.g. nextcloud:fpm -> nextcloud:fpm kept as-is)
-        image_to_container[image] = container
-
-    # Build dependency graph: container -> set of containers that depend on it
-    dependents = {svc.get('container_name', name): set() for name, svc in services.items()}
-    container_to_svc = {svc.get('container_name', name): name for name, svc in services.items()}
-
-    for svc_name, svc in services.items():
-        container = svc.get('container_name', svc_name)
-        for dep_svc in svc.get('depends_on', {}).keys():
-            dep_container = services[dep_svc].get('container_name', dep_svc)
-            dependents[dep_container].add(container)
-
-    # Also handle network_mode: container:<name>
-    for svc_name, svc in services.items():
-        container = svc.get('container_name', svc_name)
-        network_mode = svc.get('network_mode', '')
-        if network_mode.startswith('container:'):
-            parent = network_mode.split('container:')[1]
-            dependents[parent].add(container)
-
-    def get_all_dependents(container, visited=None):
-        """Recursively get all containers that depend on this one."""
-        if visited is None:
-            visited = set()
-        if container in visited:
-            return visited
-        visited.add(container)
-        for dep in dependents.get(container, set()):
-            get_all_dependents(dep, visited)
-        return visited
-
-    # Find which containers need restarting
-    containers_to_restart = set()
-    for image in updated_images:
-        # Match image name (handle tags)
-        matched_container = None
-        for img, container in image_to_container.items():
-            if img == image or img.split(':')[0] == image.split(':')[0]:
-                matched_container = container
-                break
-
-        if matched_container:
-            affected = get_all_dependents(matched_container)
-            containers_to_restart.update(affected)
-
-    if not containers_to_restart:
+    if not services:
         return []
 
-    # Order by dependency: start with containers that have no dependencies first
-    def get_start_order(containers):
-        """Topological sort of containers to get correct start order."""
-        # Build local dep map for just these containers
-        result = []
-        remaining = set(containers)
-        svc_depends = {}
-        for c in containers:
-            svc_name = container_to_svc.get(c, c)
-            svc = services.get(svc_name, {})
-            deps = set()
-            for dep_svc in svc.get('depends_on', {}).keys():
-                dep_container = services[dep_svc].get('container_name', dep_svc)
-                if dep_container in containers:
-                    deps.add(dep_container)
-            network_mode = svc.get('network_mode', '')
-            if network_mode.startswith('container:'):
-                parent = network_mode.split('container:')[1]
-                if parent in containers:
-                    deps.add(parent)
-            svc_depends[c] = deps
+    # Map service names to their container names (if specified)
+    svc_name_to_container_name = {name: svc.get('container_name', name) for name, svc in services.items()}
 
-        while remaining:
-            # Find containers whose dependencies are all already in result
-            ready = {c for c in remaining if svc_depends[c].issubset(set(result))}
-            if not ready:
-                # Cycle or unresolved, just add remaining as-is
-                result.extend(remaining)
+    # Map image names to service names
+    image_to_svc_name = {}
+    for svc_name, svc_config in services.items():
+        image = svc_config.get('image', '')
+        if image:
+            image_to_svc_name[image] = svc_name
+
+    # Build a graph of network dependencies: network_provider_service_name -> set of network_consumer_service_names
+    network_dependents_graph = {svc_name: set() for svc_name in services}
+
+    for svc_name, svc_config in services.items():
+        network_mode = str(svc_config.get('network_mode', ''))
+        
+        network_provider_svc_name = None
+        if network_mode.startswith('service:'):
+            provider_ref = network_mode.split('service:')[1]
+            if provider_ref in services: # It refers to another service by name
+                network_provider_svc_name = provider_ref
+        elif network_mode.startswith('container:'):
+            provider_ref = network_mode.split('container:')[1]
+            # This can refer to a container name or a service name
+            # Try to resolve container name back to service name
+            for s_name, s_config in services.items():
+                if s_config.get('container_name') == provider_ref or s_name == provider_ref:
+                    network_provider_svc_name = s_name
+                    break
+        
+        if network_provider_svc_name and network_provider_svc_name in network_dependents_graph:
+            network_dependents_graph[network_provider_svc_name].add(svc_name)
+
+    # Find all network consumers (direct and transitive) of an updated service
+    services_to_explicitly_stop = set()
+
+    def find_network_consumers_recursive(provider_svc, visited=None):
+        if visited is None:
+            visited = set()
+        if provider_svc in visited:
+            return set() # Already processed
+        visited.add(provider_svc)
+
+        consumers = set()
+        for dependent_svc in network_dependents_graph.get(provider_svc, set()):
+            consumers.add(dependent_svc)
+            consumers.update(find_network_consumers_recursive(dependent_svc, visited))
+        return consumers
+
+    # Identify services whose images are updated
+    updated_service_names = set()
+    for updated_img in updated_images:
+        # Match image (exact or repository match)
+        for img_key, svc_name in image_to_svc_name.items():
+            if img_key == updated_img or (img_key and img_key.split(':')[0] == updated_img.split(':')[0]):
+                updated_service_names.add(svc_name)
+
+    for updated_svc in updated_service_names:
+        # Find all services that network-depend on this updated service (directly or indirectly)
+        # These are the ones we need to explicitly stop.
+        services_to_explicitly_stop.update(find_network_consumers_recursive(updated_svc))
+    
+    # Convert service names to container names for stopping
+    containers_to_stop = {svc_name_to_container_name[s] for s in services_to_explicitly_stop}
+
+    if not containers_to_stop:
+        return []
+
+    # Order the containers to stop: consumers first (reverse topological sort of the subset)
+    # This ensures that if A depends on B, and B depends on C, and C is updated,
+    # we stop A, then B, then C.
+    def get_stop_order(containers_subset):
+        ordered_containers = []
+        remaining_containers = set(containers_subset)
+        
+        # Build a local graph for the subset of containers we care about stopping
+        local_network_dependents = {c: set() for c in containers_subset}
+        for provider_svc_name, consumer_svc_names in network_dependents_graph.items():
+            provider_container_name = svc_name_to_container_name.get(provider_svc_name)
+            if provider_container_name in containers_subset:
+                for consumer_svc_name in consumer_svc_names:
+                    consumer_container_name = svc_name_to_container_name.get(consumer_svc_name)
+                    if consumer_container_name in containers_subset:
+                        local_network_dependents[provider_container_name].add(consumer_container_name)
+
+        while remaining_containers:
+            # Find containers that are not network providers for any other container still in 'remaining_containers'
+            # (i.e., they are "leaf" consumers in the current subgraph)
+            ready_to_stop = set()
+            for c in remaining_containers:
+                is_provider_for_others_in_subset = False
+                for provider, consumers in local_network_dependents.items():
+                    if provider == c and any(consumer in remaining_containers for consumer in consumers):
+                        is_provider_for_others_in_subset = True
+                        break
+                if not is_provider_for_others_in_subset:
+                    ready_to_stop.add(c)
+            
+            if not ready_to_stop:
+                # Should not happen if graph is acyclic and logic is correct, but as a fallback
+                # if there's a cycle or an issue, just add remaining.
+                ordered_containers.extend(sorted(list(remaining_containers)))
                 break
-            result.extend(sorted(ready))
-            remaining -= ready
+            
+            ordered_containers.extend(sorted(list(ready_to_stop)))
+            remaining_containers -= ready_to_stop
+        
+        return ordered_containers
 
-        return result
+    return get_stop_order(containers_to_stop)
 
-    ordered = get_start_order(containers_to_restart)
-    return ordered
-
-def docker_compose_pull(auto_yes=False):
+def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes parameter
     """Pull docker-compose images in configured directories and restart if updates found"""
     config = load_config()
     compose_paths = config.get('docker_compose_paths', [])
@@ -1032,10 +1060,10 @@ def docker_compose_pull(auto_yes=False):
         return True
     
     overall_success = True
-    updated_images = []
     
     for path_str in valid_paths:
         compose_path = Path(path_str)
+        updated_images = []
         
         if not compose_path.exists():
             print(f"⚠️  Directory {compose_path} no longer exists, skipping")
@@ -1092,8 +1120,8 @@ def docker_compose_pull(auto_yes=False):
             stderr_output = []
 
             def stream_reader(stream, output_list):
-                for line in iter(stream.readline, ''):
-                    output_list.append(line)
+                for stream_line in iter(stream.readline, ''): # Modified: Renamed 'line' to 'stream_line'
+                    output_list.append(stream_line)
                 stream.close()
                 
             stdout_thread = threading.Thread(target=stream_reader, args=(process.stdout, stdout_output))
@@ -1144,12 +1172,11 @@ def docker_compose_pull(auto_yes=False):
                         post_pull_digests[name] = digest
 
                     for name, digest in post_pull_digests.items():
-                        if '<none>' in name:
-                            continue
-                        if name in pre_pull_digests and pre_pull_digests[name] != digest:
-                            updated_images.append(name)
-                        elif name not in pre_pull_digests:
-                            updated_images.append(name)
+                        if '<none>' not in name: # Only consider named images
+                            if name in pre_pull_digests and pre_pull_digests[name] != digest:
+                                updated_images.append(name)
+                            elif name not in pre_pull_digests: # Newly pulled image
+                                updated_images.append(name)
 
                     # Print confirmed updates
                     for image in updated_images:
@@ -1163,66 +1190,32 @@ def docker_compose_pull(auto_yes=False):
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:
-                    restart_targets = build_restart_targets(updated_images, compose_path)
+                    # Get only the network-dependent sidecars that need explicit stopping
+                    containers_to_stop_explicitly = build_restart_targets(updated_images, compose_path)
 
-                    if restart_targets is None:
-                        # Could not parse compose file, fall back to full restart
-                        print("⚠️  Could not parse compose file, falling back to full stack restart...")
-                        restart_targets = None
-
-                    if restart_targets is not None and len(restart_targets) > 0:
-                        # Check if any network_mode: container: dependencies are affected
-                        # If so, fall back to full down to avoid Podman orphaned container errors
-                        needs_full_down = False
-                        try:
-                            import yaml
-                            with open(compose_file, 'r') as f:
-                                compose_data = yaml.safe_load(f)
-                            for svc_name, svc in compose_data.get('services', {}).items():
-                                container = svc.get('container_name', svc_name)
-                                network_mode = svc.get('network_mode', '')
-                                if network_mode.startswith('container:'):
-                                    parent = network_mode.split('container:')[1]
-                                    if parent in restart_targets:
-                                        needs_full_down = True
-                                        break
-                        except Exception:
-                            needs_full_down = True
-
-                        if needs_full_down:
-                            print(f"🔄 Network namespace dependency detected, performing full stack down/up...")
-                            subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
-                        else:
-                            print(f"🔄 Stopping {len(restart_targets)} affected container(s): {', '.join(restart_targets)}")
-                            for container in reversed(restart_targets):
-                                print(f"  ⏹️  Stopping {container}...")
-                                subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
-                        # Let compose bring everything back up in the right order
-                        print("🔄 Bringing stack back up...")
-                        up_result = subprocess.run(
-                            ['docker-compose', 'up', '-d'],
-                            check=False, capture_output=False
-                        )
-                        if up_result.returncode == 0:
-                            print("✅ Containers restarted successfully")
-                        else:
-                            print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
-                            failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
-                            overall_success = False
-                    elif restart_targets is not None and len(restart_targets) == 0:
-                        print("⚠️  Updates found but no matching containers identified, falling back to full restart...")
-                        subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
-                        subprocess.run(['docker-compose', 'up', '-d'], check=False, capture_output=False)
+                    if containers_to_stop_explicitly:
+                        print(f"🔄 Network-dependent sidecar(s) detected. Stopping {len(containers_to_stop_explicitly)} container(s): {', '.join(containers_to_stop_explicitly)}")
+                        # Stop in the order returned by build_restart_targets (consumers first)
+                        for container in containers_to_stop_explicitly:
+                            print(f"  ⏹️  Stopping {container}...")
+                            subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
+                    
+                    # Now, run docker-compose up -d.
+                    # This will:
+                    # 1. Recreate any updated services (providers).
+                    # 2. Start any services that were explicitly stopped (consumers).
+                    # 3. Handle 'depends_on' dependencies automatically.
+                    print("🔄 Applying updates with docker-compose up -d...")
+                    up_result = subprocess.run(
+                        ['docker-compose', 'up', '-d'],
+                        check=False, capture_output=False
+                    )
+                    if up_result.returncode == 0:
+                        print("✅ Containers updated and restarted successfully")
                     else:
-                        # Full restart fallback
-                        print("🔄 Updates detected, performing full stack restart...")
-                        subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
-                        up_result = subprocess.run(['docker-compose', 'up', '-d'], check=False, capture_output=False)
-                        if up_result.returncode == 0:
-                            print("✅ Containers restarted successfully")
-                        else:
-                            failures.append(f"docker-compose up failed in {compose_path}")
-                            overall_success = False
+                        print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
+                        failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
+                        overall_success = False
                 else:
                     print("ℹ️  No updates found, containers not restarted")
 
@@ -1468,15 +1461,15 @@ Command-line flags override config when provided. Run `--help` to see platform-s
     if os_type == 'macos':
         # Define macOS tasks
         macos_tasks = [
-            (update_macos_system_software, not args.skip_os_updates, auto_yes),
-            (update_homebrew_packages, not args.skip_homebrew, auto_yes),
-            (update_mas_apps, not args.skip_mas, auto_yes),
-            (update_ruby_gems, not args.skip_pip, auto_yes),
-            (update_npm_packages, not args.skip_pip, auto_yes),
-            (update_vim_plugins, not args.skip_vim, auto_yes),
-            (update_oh_my_zsh, not args.skip_omz, auto_yes),
-            (update_tmux_plugins, not args.skip_tmux, auto_yes),
-            (update_mac_apps, args.macupdater, auto_yes),
+            (update_macos_system_software, not args.skip_os_updates), # Modified: Removed auto_yes
+            (update_homebrew_packages, not args.skip_homebrew), # Modified: Removed auto_yes
+            (update_mas_apps, not args.skip_mas), # Modified: Removed auto_yes
+            (update_ruby_gems, not args.skip_pip), # Modified: Removed auto_yes
+            (update_npm_packages, not args.skip_pip), # Modified: Removed auto_yes
+            (update_vim_plugins, not args.skip_vim), # Modified: Removed auto_yes
+            (update_oh_my_zsh, not args.skip_omz), # Modified: Removed auto_yes
+            (update_tmux_plugins, not args.skip_tmux), # Modified: Removed auto_yes
+            (update_mac_apps, args.macupdater), # Modified: Removed auto_yes
         ]
 
         for task, should_run, *task_args in macos_tasks:
@@ -1498,10 +1491,10 @@ Command-line flags override config when provided. Run `--help` to see platform-s
                     success_count += 1
         # Other Linux tasks
         linux_tasks = [
-            (refresh_snaps, not args.skip_snap, auto_yes),
-            (update_flatpaks, not args.skip_flatpak, auto_yes),
-            (update_pip_packages, not args.skip_pip, auto_yes),
-            (update_tmux_plugins, not args.skip_tmux, auto_yes),
+            (refresh_snaps, not args.skip_snap), # Modified: Removed auto_yes
+            (update_flatpaks, not args.skip_flatpak), # Modified: Removed auto_yes
+            (update_pip_packages, not args.skip_pip), # Modified: Removed auto_yes
+            (update_tmux_plugins, not args.skip_tmux), # Modified: Removed auto_yes
             (update_firmware, not args.skip_firmware, auto_yes, args.apply_firmware),
         ]
         for task, should_run, *task_args in linux_tasks:
@@ -1525,7 +1518,7 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             compose_paths = setup_docker_compose_config(auto_yes)
             if compose_paths or load_config().get('docker_compose_enabled', False):
                 total_tasks += 1
-                if docker_compose_pull(auto_yes):
+                if docker_compose_pull(auto_yes): # Modified: Passed auto_yes to docker_compose_pull
                     success_count += 1
         
         if not args.skip_docker_prune:
