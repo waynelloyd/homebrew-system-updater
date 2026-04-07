@@ -358,6 +358,8 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+### v1.1.3
+- Fixed:  Fixed detect when sidecar containers in podman are in the restart targets and fall back to a full docker-compose down/up to fix dependant containers error
 
 ### v1.1.2
 - Fixed: Digest-pinned images with `@sha256:` references (e.g. immich-app/postgres) no longer appear as `<none>` in the updated containers list or trigger false restarts

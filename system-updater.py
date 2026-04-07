@@ -16,7 +16,7 @@ import itertools
 import threading
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 # Global list to store pending actions
 pending_actions = []
@@ -1171,11 +1171,32 @@ def docker_compose_pull(auto_yes=False):
                         restart_targets = None
 
                     if restart_targets is not None and len(restart_targets) > 0:
-                        print(f"🔄 Stopping {len(restart_targets)} affected container(s): {', '.join(restart_targets)}")
-                        # Stop in reverse order
-                        for container in reversed(restart_targets):
-                            print(f"  ⏹️  Stopping {container}...")
-                            subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
+                        # Check if any network_mode: container: dependencies are affected
+                        # If so, fall back to full down to avoid Podman orphaned container errors
+                        needs_full_down = False
+                        try:
+                            import yaml
+                            with open(compose_file, 'r') as f:
+                                compose_data = yaml.safe_load(f)
+                            for svc_name, svc in compose_data.get('services', {}).items():
+                                container = svc.get('container_name', svc_name)
+                                network_mode = svc.get('network_mode', '')
+                                if network_mode.startswith('container:'):
+                                    parent = network_mode.split('container:')[1]
+                                    if parent in restart_targets:
+                                        needs_full_down = True
+                                        break
+                        except Exception:
+                            needs_full_down = True
+
+                        if needs_full_down:
+                            print(f"🔄 Network namespace dependency detected, performing full stack down/up...")
+                            subprocess.run(['docker-compose', 'down'], check=False, capture_output=False)
+                        else:
+                            print(f"🔄 Stopping {len(restart_targets)} affected container(s): {', '.join(restart_targets)}")
+                            for container in reversed(restart_targets):
+                                print(f"  ⏹️  Stopping {container}...")
+                                subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
                         # Let compose bring everything back up in the right order
                         print("🔄 Bringing stack back up...")
                         up_result = subprocess.run(
