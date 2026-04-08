@@ -910,13 +910,16 @@ def build_restart_targets(updated_images, compose_path):
     try:
         with open(compose_file, 'r') as f:
             compose = yaml.safe_load(f)
-    except Exception:
-        print(f"⚠️  Could not parse compose file {compose_path / compose_file}, skipping specific network restart logic.")
+    except Exception as e:
+        print(f"⚠️  Could not parse compose file {compose_path / compose_file}: {e}")
         return [] # Fallback to letting docker-compose up -d handle everything
 
     services = compose.get('services', {})
     if not services:
         return []
+
+    # Debug: Print all services and their network modes
+    # print(f"🔍 DEBUG: Found {len(services)} services in compose file")
 
     # Map service names to their container names (if specified)
     svc_name_to_container_name = {name: svc.get('container_name', name) for name, svc in services.items()}
@@ -928,28 +931,36 @@ def build_restart_targets(updated_images, compose_path):
         if image:
             image_to_svc_name[image] = svc_name
 
+    # print(f"🔍 DEBUG: Image to service mapping: {image_to_svc_name}")
+
     # Build a graph of network dependencies: network_provider_service_name -> set of network_consumer_service_names
     network_dependents_graph = {svc_name: set() for svc_name in services}
 
     for svc_name, svc_config in services.items():
         network_mode = str(svc_config.get('network_mode', ''))
-        
+
         network_provider_svc_name = None
         if network_mode.startswith('service:'):
-            provider_ref = network_mode.split('service:')[1]
+            provider_ref = network_mode.split('service:')[1].strip()
             if provider_ref in services: # It refers to another service by name
                 network_provider_svc_name = provider_ref
+                # print(f"🔍 DEBUG: Service '{svc_name}' depends on service '{provider_ref}' via network_mode")
         elif network_mode.startswith('container:'):
-            provider_ref = network_mode.split('container:')[1]
+            provider_ref = network_mode.split('container:')[1].strip()
             # This can refer to a container name or a service name
             # Try to resolve container name back to service name
             for s_name, s_config in services.items():
                 if s_config.get('container_name') == provider_ref or s_name == provider_ref:
                     network_provider_svc_name = s_name
+                    # print(f"🔍 DEBUG: Service '{svc_name}' depends on container/service '{provider_ref}' via network_mode")
                     break
-        
+
         if network_provider_svc_name and network_provider_svc_name in network_dependents_graph:
             network_dependents_graph[network_provider_svc_name].add(svc_name)
+            # print(f"🔍 DEBUG: Added '{svc_name}' to dependents of '{network_provider_svc_name}'")
+        elif network_mode and network_mode != 'bridge' and network_mode != 'host':
+            # print(f"🔍 DEBUG: Service '{svc_name}' has network_mode='{network_mode}' but could not resolve provider")
+            continue
 
     # Find all network consumers (direct and transitive) of an updated service
     services_to_explicitly_stop = set()
@@ -970,18 +981,54 @@ def build_restart_targets(updated_images, compose_path):
     # Identify services whose images are updated
     updated_service_names = set()
     for updated_img in updated_images:
-        # Match image (exact or repository match)
+        # print(f"🔍 DEBUG: Trying to match updated image: '{updated_img}'")
+        matched = False
         for img_key, svc_name in image_to_svc_name.items():
-            if img_key == updated_img or (img_key and img_key.split(':')[0] == updated_img.split(':')[0]):
+            # Try exact match first
+            if img_key == updated_img:
                 updated_service_names.add(svc_name)
+                # print(f"🔍 DEBUG: Image '{updated_img}' exactly matched to service '{svc_name}'")
+                matched = True
+                break
+
+            # Try repository match (without tag)
+            img_repo = updated_img.split(':')[0] if ':' in updated_img else updated_img
+            key_repo = img_key.split(':')[0] if ':' in img_key else img_key
+
+            if img_repo and img_repo == key_repo:
+                updated_service_names.add(svc_name)
+                # print(f"🔍 DEBUG: Image '{updated_img}' matched by repository to service '{svc_name}'")
+                matched = True
+                break
+
+            # Try matching the image name part (handle registry prefixes)
+            # e.g., ghcr.io/qdm12/gluetun matches against ghcr.io/qdm12/gluetun:latest
+            if img_repo in img_key or img_key in img_repo:
+                updated_service_names.add(svc_name)
+                # print(f"🔍 DEBUG: Image '{updated_img}' partially matched to service '{svc_name}'")
+                matched = True
+                break
+
+        if not matched:
+            # print(f"⚠️  DEBUG: Could not match updated image '{updated_img}' to any service")
+            pass
+
+    # print(f"🔍 DEBUG: Updated services: {updated_service_names}")
+    # print(f"🔍 DEBUG: Network dependency graph: {dict(network_dependents_graph)}")
 
     for updated_svc in updated_service_names:
         # Find all services that network-depend on this updated service (directly or indirectly)
         # These are the ones we need to explicitly stop.
-        services_to_explicitly_stop.update(find_network_consumers_recursive(updated_svc))
-    
+        consumers = find_network_consumers_recursive(updated_svc)
+        # print(f"🔍 DEBUG: Service '{updated_svc}' has network consumers: {consumers}")
+        services_to_explicitly_stop.update(consumers)
+
+    # print(f"🔍 DEBUG: Services to stop: {services_to_explicitly_stop}")
+
     # Convert service names to container names for stopping
     containers_to_stop = {svc_name_to_container_name[s] for s in services_to_explicitly_stop}
+
+    # print(f"🔍 DEBUG: Containers to stop (by name): {containers_to_stop}")
 
     if not containers_to_stop:
         return []
@@ -1089,7 +1136,7 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
             print(f"Running: Pulling docker-compose images in {compose_path}")
             print(f"Command: docker-compose pull")
             print(f"{'='*50}")
-           
+            
             # Snapshot image IDs before pull to detect changes
             pre_pull_digests = {}
             try:
@@ -1107,9 +1154,13 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                         # Use repository only as key for digest-pinned images
                         name = name.split(':')[0]
                     pre_pull_digests[name] = digest
-            except Exception:
-                pass
-            process = subprocess.Popen(['docker-compose', 'pull'], 
+                    # Also store by repository-only (without tag) for better matching
+                    repo_only = name.split(':')[0] if ':' in name else name
+                    if repo_only not in pre_pull_digests:
+                        pre_pull_digests[repo_only] = digest
+            except Exception as e:
+                print(f"⚠️  Could not snapshot pre-pull image digests: {e}")
+            process = subprocess.Popen(['docker-compose', 'pull'],
                                        stdout=subprocess.PIPE, 
                                        stderr=subprocess.PIPE, 
                                        text=True,
@@ -1170,24 +1221,27 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                         if '<none>' in name:
                             name = name.split(':')[0]
                         post_pull_digests[name] = digest
+                        # Also store by repository-only for better matching
+                        repo_only = name.split(':')[0] if ':' in name else name
+                        if repo_only not in post_pull_digests:
+                            post_pull_digests[repo_only] = digest
 
                     for name, digest in post_pull_digests.items():
                         if '<none>' not in name: # Only consider named images
                             if name in pre_pull_digests and pre_pull_digests[name] != digest:
                                 updated_images.append(name)
+                                print(f"🔍 DEBUG: Image updated (exact match): {name}")
                             elif name not in pre_pull_digests: # Newly pulled image
                                 updated_images.append(name)
+                                print(f"🔍 DEBUG: New image (not in pre-pull): {name}")
 
-                    # Print confirmed updates
-                    for image in updated_images:
-                        if '<none>' not in image:
-                            print(f"  ✅ {image}")
 
                 except Exception as e:
                     print(f"⚠️  Could not compare image digests: {e}")
 
                 updates_found = len(updated_images) > 0
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
+                # print(f"🔍 DEBUG: Updated images detected: {updated_images if updated_images else 'none'}")
 
                 if updates_found:
                     # Get only the network-dependent sidecars that need explicit stopping
@@ -1198,24 +1252,59 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                         # Stop in the order returned by build_restart_targets (consumers first)
                         for container in containers_to_stop_explicitly:
                             print(f"  ⏹️  Stopping {container}...")
-                            subprocess.run(['docker', 'stop', container], check=False, capture_output=False)
-                    
+                            # Get the container ID before stopping
+                            id_result = subprocess.run(['docker', 'ps', '-a', '--filter', f'name={container}', '--format', '{{.ID}}'],
+                                                      check=False, capture_output=True, text=True)
+                            if id_result.stdout.strip():
+                                container_id = id_result.stdout.strip().split()[0]
+                                print(f"       Container ID: {container_id}")
+                            stop_result = subprocess.run(['docker', 'stop', container], check=False, capture_output=True, text=True)
+                            if stop_result.returncode != 0:
+                                print(f"       ⚠️  Failed to stop: {stop_result.stderr.strip() if stop_result.stderr else 'unknown error'}")
+                    else:
+                        print(f"ℹ️  No network-dependent sidecars detected for updated images")
+
                     # Now, run docker-compose up -d.
                     # This will:
                     # 1. Recreate any updated services (providers).
                     # 2. Start any services that were explicitly stopped (consumers).
                     # 3. Handle 'depends_on' dependencies automatically.
                     print("🔄 Applying updates with docker-compose up -d...")
-                    up_result = subprocess.run(
-                        ['docker-compose', 'up', '-d'],
-                        check=False, capture_output=False
-                    )
-                    if up_result.returncode == 0:
-                        print("✅ Containers updated and restarted successfully")
-                    else:
-                        print(f"❌ docker-compose up failed with exit code {up_result.returncode}")
-                        failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
-                        overall_success = False
+
+                    # Retry docker-compose up in case of transient container dependency issues
+                    max_retries = 3
+                    retry_count = 0
+                    up_success = False
+                    up_result = None
+
+                    while retry_count < max_retries and not up_success:
+                        up_result = subprocess.run(
+                            ['docker-compose', 'up', '-d'],
+                            check=False, capture_output=True, text=True
+                        )
+                        if up_result.returncode == 0:
+                            print("✅ Containers updated and restarted successfully")
+                            up_success = True
+                        else:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                print(f"⚠️  docker-compose up attempt {retry_count} failed (exit code {up_result.returncode}), retrying...")
+                                time.sleep(2)  # Wait before retry
+                            else:
+                                print(f"❌ docker-compose up failed after {max_retries} attempts with exit code {up_result.returncode}")
+                                if up_result.stderr:
+                                    print(f"Error: {up_result.stderr.strip()}")
+                                failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
+                                overall_success = False
+
+                    if not up_success and up_result and up_result.stderr and "dependent containers" in up_result.stderr:
+                        # Dependent container issue detected - try to clean up orphaned containers
+                        print("🧹 Attempting to clean up orphaned containers...")
+                        try:
+                            subprocess.run(['docker', 'container', 'prune', '-f'],
+                                         check=False, capture_output=True)
+                        except Exception:
+                            pass
                 else:
                     print("ℹ️  No updates found, containers not restarted")
 
@@ -1246,16 +1335,63 @@ def docker_system_prune(auto_yes=False):
         subprocess.run(['docker', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
-    
-    command = ['docker', 'system', 'prune']
-    if auto_yes:
-        command.append('-f')  # Force, don't prompt for confirmation
-    
-    return run_command(command, "Cleaning up Docker system (prune)", auto_yes)
+
+    print(f"\n{'='*50}")
+    print("Running: Cleaning up Docker system (prune)")
+    print(f"Command: docker system prune -f")
+    print(f"{'='*50}")
+
+    try:
+        # First, try standard prune
+        result = subprocess.run(['docker', 'system', 'prune', '-f'],
+                               check=False, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("✅ Docker system prune completed successfully")
+            return True
+        elif "dependent containers" in result.stderr or "dependent containers" in result.stdout:
+            # Dependent container issue - need more aggressive cleanup
+            print("⚠️  Detected dependent container issues, attempting more aggressive cleanup...")
+
+            # Remove stopped containers
+            subprocess.run(['docker', 'container', 'prune', '-f'],
+                          check=False, capture_output=True)
+
+            # Remove dangling images
+            subprocess.run(['docker', 'image', 'prune', '-f'],
+                          check=False, capture_output=True)
+
+            # Remove unused volumes
+            subprocess.run(['docker', 'volume', 'prune', '-f'],
+                          check=False, capture_output=True)
+
+            # Try system prune again
+            result = subprocess.run(['docker', 'system', 'prune', '-f'],
+                                   check=False, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                print("✅ Docker system cleanup completed after retry")
+                return True
+            else:
+                msg = f"Docker system prune failed with exit code {result.returncode} (command: docker system prune -f)"
+                print(f"⚠️  {msg}")
+                failures.append(msg)
+                return False
+        else:
+            msg = f"Docker system prune failed with exit code {result.returncode} (command: docker system prune -f)"
+            print(f"❌ {msg}")
+            failures.append(msg)
+            return False
+
+    except Exception as e:
+        msg = f"Error during docker system prune: {e}"
+        print(f"❌ {msg}")
+        failures.append(msg)
+        return False
 
 def config_get_bool(config, *keys, default=False):
     """Return a boolean from the config for any of the provided keys.
-    Keys may be provided with hyphens or underscores (e.g. 'skip-docker-prune' or 'skip_docker_prune').
+    Keys may be provided with hyphen or underscore (e.g. 'skip-docker-prune' or 'skip_docker_prune').
     Handles string values like 'true'/'yes' as well as booleans.
     """
     for key in keys:

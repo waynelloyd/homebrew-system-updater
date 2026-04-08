@@ -363,6 +363,7 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 - Fixed: Improved targeted restart logic — now only explicitly stops network-dependent sidecars (`network_mode: service:` or `network_mode: container:`) of updated services
 - Fixed: Reliably use `docker-compose up -d` to handle recreation of updated services and restart of dependents in the correct order, avoiding unnecessary full-stack restarts
 - Improved: Code cleanup — removed unused variables and redundant function parameters
+- Fixed: Removed debug output lines for cleaner production release
 
 ### v1.1.3
 - Fixed:  Fixed detect when sidecar containers in podman are in the restart targets and fall back to a full docker-compose down/up to fix dependant containers error
