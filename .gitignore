@@ -214,3 +214,5 @@ __marimo__/
 
 # Ignore everything else
 .idea/*
+DEBUG_OUTPUT_GUIDE.md
+ROOT_CAUSE_ANALYSIS.md
