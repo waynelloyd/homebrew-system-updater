@@ -1229,11 +1229,13 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                     for name, digest in post_pull_digests.items():
                         if '<none>' not in name: # Only consider named images
                             if name in pre_pull_digests and pre_pull_digests[name] != digest:
-                                updated_images.append(name)
-                                print(f"🔍 DEBUG: Image updated (exact match): {name}")
+                                # Only add if not already in list (avoid duplicates from repo-only matching)
+                                if name not in updated_images:
+                                    updated_images.append(name)
                             elif name not in pre_pull_digests: # Newly pulled image
-                                updated_images.append(name)
-                                print(f"🔍 DEBUG: New image (not in pre-pull): {name}")
+                                # Only add if not already in list (avoid duplicates)
+                                if name not in updated_images:
+                                    updated_images.append(name)
 
 
                 except Exception as e:
@@ -1241,7 +1243,6 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
 
                 updates_found = len(updated_images) > 0
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
-                # print(f"🔍 DEBUG: Updated images detected: {updated_images if updated_images else 'none'}")
 
                 if updates_found:
                     # Get only the network-dependent sidecars that need explicit stopping
