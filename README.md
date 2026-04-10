@@ -358,6 +358,9 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+### v1.1.5
+- Fixed: `:latest` tag stripped from image names in digest comparison to match compose file references that omit the tag, ensuring correct restart target identification
+
 ### v1.1.4
 - Added: `import yaml` to handle docker-compose parsing correctly
 - Fixed: Improved targeted restart logic — now only explicitly stops network-dependent sidecars (`network_mode: service:` or `network_mode: container:`) of updated services
@@ -391,10 +394,3 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 - Fixed: stdout and stderr both being parsed for pull progress causing duplicate detections — stdout now uses a plain reader
 - Changed: `docker system prune -a` replaced with `docker system prune` to preserve image layer cache and prevent false positive update detection on consecutive runs
 - Changed: Restart logic no longer requires full `docker-compose down` — targeted stop followed by `docker-compose up -d` handles all runtimes including Podman
-
-### v1.0.8
-- Fixed: Use `docker-compose down` before `up -d` on Podman to clean up orphaned containers
-- Added: `is_podman()` detection — only performs `down` step when Podman is detected
-- Improved: Error handling for docker-compose restart failures
-- Improved: Tightened update detection keywords to avoid false positives
-- Added: Summary of updated container images printed at end of run

@@ -17,7 +17,7 @@ import threading
 import yaml # Added: Import yaml for docker-compose parsing
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.4" # Incrementing version for this change
+__version__ = "1.1.5" # Incrementing version for this change
 
 # Global list to store pending actions
 pending_actions = []
@@ -1002,7 +1002,6 @@ def build_restart_targets(updated_images, compose_path):
                 break
 
             # Try matching the image name part (handle registry prefixes)
-            # e.g., ghcr.io/qdm12/gluetun matches against ghcr.io/qdm12/gluetun:latest
             if img_repo in img_key or img_key in img_repo:
                 updated_service_names.add(svc_name)
                 # print(f"🔍 DEBUG: Image '{updated_img}' partially matched to service '{svc_name}'")
@@ -1149,15 +1148,12 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                         continue
                     name, digest = line.split('==', 1)
                     name = name.strip().replace('docker.io/library/', 'docker.io/')
+                    if name.endswith(':latest'):
+                        name = name[:-7]  # strip :latest to match compose file references
                     digest = digest.strip()
                     if '<none>' in name:
-                        # Use repository only as key for digest-pinned images
                         name = name.split(':')[0]
                     pre_pull_digests[name] = digest
-                    # Also store by repository-only (without tag) for better matching
-                    repo_only = name.split(':')[0] if ':' in name else name
-                    if repo_only not in pre_pull_digests:
-                        pre_pull_digests[repo_only] = digest
             except Exception as e:
                 print(f"⚠️  Could not snapshot pre-pull image digests: {e}")
             process = subprocess.Popen(['docker-compose', 'pull'],
@@ -1217,14 +1213,12 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                             continue
                         name, digest = line.split('==', 1)
                         name = name.strip().replace('docker.io/library/', 'docker.io/')
+                        if name.endswith(':latest'):
+                            name = name[:-7]  # strip :latest to match compose file references
                         digest = digest.strip()
                         if '<none>' in name:
                             name = name.split(':')[0]
                         post_pull_digests[name] = digest
-                        # Also store by repository-only for better matching
-                        repo_only = name.split(':')[0] if ':' in name else name
-                        if repo_only not in post_pull_digests:
-                            post_pull_digests[repo_only] = digest
 
                     for name, digest in post_pull_digests.items():
                         if '<none>' not in name: # Only consider named images
