@@ -14,10 +14,10 @@ from pathlib import Path
 import time
 import itertools
 import threading
-import yaml # Added: Import yaml for docker-compose parsing
+import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.5" # Incrementing version for this change
+__version__ = "1.1.6" # Incrementing version for improved PyYAML error messages
 
 # Global list to store pending actions
 pending_actions = []
@@ -736,24 +736,6 @@ def update_pip_packages(): # Modified: Removed unused auto_yes parameter
     
     return success
 
-def update_mac_apps(): # Modified: Removed unused auto_yes parameter
-    """Update Mac applications using MacUpdater"""
-    os_type = detect_os()
-    if os_type != 'macos':
-        return True  # Skip silently on non-macOS
-    
-    macupdater_path = '/Applications/MacUpdater.app/Contents/Resources/macupdater_client'
-    
-    if not os.path.exists(macupdater_path):
-        return True  # Skip silently if MacUpdater not installed
-    
-    # Scan for updates
-    if not run_command([macupdater_path, 'scan'], "Scanning for Mac app updates"):
-        return False
-    
-    # Apply updates
-    return run_command([macupdater_path, 'update'], "Updating Mac applications")
-
 def update_firmware(auto_yes=False, apply_firmware=False):
     """Update firmware using fwupdmgr (Linux only).
 
@@ -894,7 +876,6 @@ def build_restart_targets(updated_images, compose_path):
     """Given a list of updated image names, return an ordered list of containers to explicitly stop
     because they are network-dependent sidecars of an updated service.
     """
-    # import yaml # Moved to global import
 
     # Find compose file
     compose_file = None
@@ -1077,6 +1058,7 @@ def build_restart_targets(updated_images, compose_path):
 
 def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes parameter
     """Pull docker-compose images in configured directories and restart if updates found"""
+
     config = load_config()
     compose_paths = config.get('docker_compose_paths', [])
     
@@ -1442,7 +1424,6 @@ def interactive_configure(config, os_type):
     if os_type == 'macos':
         set_config_val('skip-homebrew', ask_bool('Skip Homebrew updates by default?', config_get_bool(config, 'skip-homebrew', 'skip_homebrew', False)))
         set_config_val('skip-mas', ask_bool('Skip Mac App Store updates by default?', config_get_bool(config, 'skip-mas', 'skip_mas', False)))
-        set_config_val('macupdater', ask_bool('Enable MacUpdater by default?', config_get_bool(config, 'macupdater', 'mac_updater', False)))
         set_config_val('skip-omz', ask_bool('Skip Oh My Zsh updates by default?', config_get_bool(config, 'skip-omz', 'skip_omz', False)))
     else:
         set_config_val('skip-snap', ask_bool('Skip snap refresh by default?', config_get_bool(config, 'skip-snap', 'skip_snap', False)))
@@ -1528,8 +1509,6 @@ Command-line flags override config when provided. Run `--help` to see platform-s
                             help='Skip Mac App Store updates (macOS only)')
         parser.add_argument('--skip-omz', action='store_true', default=config_get_bool(config, 'skip-omz', 'skip_omz', False),
                             help='Skip Oh My Zsh update')
-        parser.add_argument('--macupdater', action='store_true', default=config_get_bool(config, 'macupdater', 'mac_updater', False),
-                            help='Enable MacUpdater for Mac application updates (macOS only)')
     elif os_type in ['ubuntu', 'fedora', 'rhel']:
         parser.add_argument('--skip-snap', action='store_true', default=config_get_bool(config, 'skip-snap', 'skip_snap', False),
                             help='Skip snap refresh (Linux only)')
@@ -1560,7 +1539,6 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             'skip_docker_prune': config_get_bool(config, 'skip-docker-prune', 'skip_docker_prune', False),
             'skip_tmux': config_get_bool(config, 'skip-tmux', 'skip_tmux', False),
             'interactive': config_get_bool(config, 'interactive', 'interactive_mode', False),
-            'macupdater': config_get_bool(config, 'macupdater', 'mac_updater', False),
             # Linux-specific options
             'skip_firmware': config_get_bool(config, 'skip-firmware', 'skip_firmware', False),
             'apply_firmware': config_get_bool(config, 'apply-firmware', 'apply_firmware', False),
@@ -1600,7 +1578,6 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             (update_vim_plugins, not args.skip_vim), # Modified: Removed auto_yes
             (update_oh_my_zsh, not args.skip_omz), # Modified: Removed auto_yes
             (update_tmux_plugins, not args.skip_tmux), # Modified: Removed auto_yes
-            (update_mac_apps, args.macupdater), # Modified: Removed auto_yes
         ]
 
         for task, should_run, *task_args in macos_tasks:

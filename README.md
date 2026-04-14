@@ -74,7 +74,6 @@ A comprehensive cross-platform system update script that handles package managem
 
 #### App Stores & Applications
 - **Mac App Store**: `mas outdated && mas upgrade` (via mas CLI)
-- **MacUpdater**: Scan and update Mac applications (opt-in with `--macupdater` flag)
 
 #### Developer Tools
 - **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
@@ -106,7 +105,7 @@ This means unrelated containers are never restarted, minimising downtime.
 
 If the compose file cannot be parsed, the script falls back to a full stack restart automatically.
 
-> ℹ️ **Note:** PyYAML is required for dependency graph parsing (`pip3 install pyyaml`). It is available by default on most systems.
+> ℹ️ **Note:** PyYAML is required for docker-compose dependency graph parsing and is automatically installed with the Homebrew formula.
 
 ### Docker Maintenance
 - **System Cleanup**: `docker system prune` with auto-confirmation (dangling images only — layer cache is preserved to ensure accurate update detection on subsequent runs)
@@ -120,29 +119,22 @@ If the compose file cannot be parsed, the script falls back to a full stack rest
 # Add the tap
 brew tap waynelloyd/system-updater
 
-# Install the package
+# Install system-updater (includes PyYAML for docker-compose support)
 brew install system-updater
 
 # Run it
 system-updater
 ```
 
-### Option 2: Direct Install Script
-```bash
-# System-wide install (requires sudo)
-curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/install.sh | sudo bash
-
-
-# User install (no sudo required)
-curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/main/install.sh | bash
-```
-
-### Option 3: Manual Install
+### Option 2: Manual Installation
 ```bash
 # Download and make executable
 curl -fsSL https://raw.githubusercontent.com/waynelloyd/homebrew-system-updater/refs/heads/main/system-updater.py -o system-updater
 chmod +x system-updater
 sudo mv system-updater /usr/local/bin/
+
+# Install PyYAML for docker-compose support
+pip3 install PyYAML>=6.0
 ```
 
 ## System Requirements
@@ -163,7 +155,6 @@ sudo dnf install flatpak fwupd
 
 # Install optional tools
 brew install mas  # Mac App Store CLI
-# MacUpdater: Download from https://www.corecode.io/macupdater/
 ```
 
 ## Usage
@@ -205,8 +196,6 @@ system-updater --skip-tmux
 # Skip Oh My Zsh update (macOS)
 system-updater --skip-omz
 
-# Enable MacUpdater (opt-in only)
-system-updater --macupdater
 
 # Skip Docker operations
 system-updater --skip-docker-pull --skip-docker-prune
@@ -270,7 +259,6 @@ system-updater --help
 - `--skip-vim` - Skip Vim plugin updates
 - `--skip-tmux` - Skip tmux plugin updates (TPM)
 - `--skip-omz` - Skip Oh My Zsh update (macOS only)
-- `--macupdater` - Enable MacUpdater for Mac applications (macOS only, opt-in)
 - `--skip-firmware` - Skip firmware updates (Linux only)
 - `--skip-docker-pull` - Skip docker-compose pull
 - `--skip-docker-prune` - Skip docker system prune
@@ -287,9 +275,6 @@ system-updater --help
 ```bash
 # Update everything (auto-yes by default)
 system-updater
-
-# Update everything including MacUpdater
-system-updater --macupdater
 ```
 
 ### Development Environment Update
@@ -351,6 +336,7 @@ Tasks completed successfully: 10/11
 - **Python 3.6+**
 - **sudo privileges** (for system package updates)
 - **Docker** (optional, for Docker operations)
+- **PyYAML** (required for docker-compose operations, automatically installed with Homebrew)
 - **Searches ~/ directory for compose.yml** (optional, for Docker compose operations)
 
 ## License
@@ -358,6 +344,13 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.6
+- **Changed**: PyYAML is now a required dependency instead of optional, simplifying installation and removing runtime error handling
+- **Removed**: MacUpdater support completely removed from the script and documentation
+- **Homebrew**: Updated to use system Python instead of requiring Homebrew's Python version, and always install PyYAML>=6.0 in the virtualenv
+- **Simplified**: Removed optional dependency checks and error handling for missing PyYAML
+
 ### v1.1.5
 - Fixed: `:latest` tag stripped from image names in digest comparison to match compose file references that omit the tag, ensuring correct restart target identification
 
