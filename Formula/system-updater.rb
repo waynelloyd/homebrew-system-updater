@@ -11,10 +11,12 @@ class SystemUpdater < Formula
 
   def install
     # Create a virtualenv using system Python
-    venv = virtualenv_create(libexec, "/usr/bin/python3")
+    venv_path = libexec/"venv"
+    system "python3", "-m", "venv", venv_path
 
     # Install PyYAML for docker-compose support
-    venv.pip_install "PyYAML>=6.0"
+    system "#{venv_path}/bin/pip", "install", "--upgrade", "pip"
+    system "#{venv_path}/bin/pip", "install", "PyYAML>=6.0"
 
     # Install the script to libexec
     libexec.install "system-updater.py"
@@ -25,7 +27,7 @@ class SystemUpdater < Formula
     # Create a wrapper script in bin that uses the virtualenv
     (bin/"system-updater").write <<~EOS
       #!/bin/bash
-      exec "#{venv}/bin/python3" "#{libexec}/system-updater.py" "$@"
+      exec "#{venv_path}/bin/python3" "#{libexec}/system-updater.py" "$@"
     EOS
   end
 
