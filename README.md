@@ -345,6 +345,9 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.7
+- **Fixed**: Docker-compose updates now properly remove stopped dependent containers before recreating providers, preventing "container already exists" errors during sidecar dependant container updates
+
 ### v1.1.6
 - **Changed**: PyYAML is now a required dependency instead of optional, simplifying installation and removing runtime error handling
 - **Removed**: MacUpdater support completely removed from the script and documentation

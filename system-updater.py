@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.6" # Incrementing version for improved PyYAML error messages
+__version__ = "1.1.7" # Fixed docker-compose dependent container removal issue
 
 # Global list to store pending actions
 pending_actions = []
@@ -1238,6 +1238,13 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                             stop_result = subprocess.run(['docker', 'stop', container], check=False, capture_output=True, text=True)
                             if stop_result.returncode != 0:
                                 print(f"       ⚠️  Failed to stop: {stop_result.stderr.strip() if stop_result.stderr else 'unknown error'}")
+                            else:
+                                # Remove the stopped container to allow recreation
+                                rm_result = subprocess.run(['docker', 'rm', container], check=False, capture_output=True, text=True)
+                                if rm_result.returncode != 0:
+                                    print(f"       ⚠️  Failed to remove: {rm_result.stderr.strip() if rm_result.stderr else 'unknown error'}")
+                                else:
+                                    print(f"       🗑️  Removed {container}")
                     else:
                         print(f"ℹ️  No network-dependent sidecars detected for updated images")
 
