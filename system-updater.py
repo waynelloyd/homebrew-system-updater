@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.7" # Fixed docker-compose dependent container removal issue
+__version__ = "1.1.8" # Added progress bar for docker-compose up -d and improved service restart logic
 
 # Global list to store pending actions
 pending_actions = []
@@ -566,8 +566,12 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
                 for service in services:
                     service_name = service.strip()
                     if service_name:
-                        run_command(['sudo', 'systemctl', 'restart', service_name],
-                                  f"Restarting {service_name}")
+                        if is_user_service(service_name):
+                            run_command(['systemctl', '--user', 'restart', service_name],
+                                      f"Restarting {service_name}")
+                        else:
+                            run_command(['sudo', 'systemctl', 'restart', service_name],
+                                      f"Restarting {service_name}")
             else:
                 print("ℹ️  Services not restarted. You can restart them manually later.")
                 pending_actions.append("Some services on your Fedora/RHEL system were not restarted. You may want to restart them manually.")
@@ -1221,7 +1225,7 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                 print(f"✅ Docker-compose pull completed successfully in {compose_path}")
 
                 if updates_found:
-                    # Get only the network-dependent sidecars that need explicit stopping
+                    # Get only the network-dependent sidecar(s) that need explicit stopping
                     containers_to_stop_explicitly = build_restart_targets(updated_images, compose_path)
 
                     if containers_to_stop_explicitly:
@@ -1262,33 +1266,40 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                     up_result = None
 
                     while retry_count < max_retries and not up_success:
-                        up_result = subprocess.run(
+                        # Use Popen for spinner
+                        process = subprocess.Popen(
                             ['docker-compose', 'up', '-d'],
-                            check=False, capture_output=True, text=True
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
                         )
-                        if up_result.returncode == 0:
+                        
+                        spinner = itertools.cycle(['-', '/', '|', '\\'])
+                        while process.poll() is None:
+                            sys.stdout.write(f"\r{next(spinner)} Applying updates...")
+                            sys.stdout.flush()
+                            time.sleep(0.1)
+                        
+                        sys.stdout.write("\r" + " " * 25 + "\r")  # Clear spinner line
+                        sys.stdout.flush()
+                        
+                        return_code = process.returncode
+                        stdout, stderr = process.communicate()
+                        
+                        if return_code == 0:
                             print("✅ Containers updated and restarted successfully")
                             up_success = True
                         else:
                             retry_count += 1
                             if retry_count < max_retries:
-                                print(f"⚠️  docker-compose up attempt {retry_count} failed (exit code {up_result.returncode}), retrying...")
+                                print(f"⚠️  docker-compose up attempt {retry_count} failed (exit code {return_code}), retrying...")
                                 time.sleep(2)  # Wait before retry
                             else:
-                                print(f"❌ docker-compose up failed after {max_retries} attempts with exit code {up_result.returncode}")
-                                if up_result.stderr:
-                                    print(f"Error: {up_result.stderr.strip()}")
-                                failures.append(f"docker-compose up failed in {compose_path} with exit code {up_result.returncode}")
+                                print(f"❌ docker-compose up failed after {max_retries} attempts with exit code {return_code}")
+                                if stderr:
+                                    print(f"Error: {stderr.strip()}")
+                                failures.append(f"docker-compose up failed in {compose_path} with exit code {return_code}")
                                 overall_success = False
-
-                    if not up_success and up_result and up_result.stderr and "dependent containers" in up_result.stderr:
-                        # Dependent container issue detected - try to clean up orphaned containers
-                        print("🧹 Attempting to clean up orphaned containers...")
-                        try:
-                            subprocess.run(['docker', 'container', 'prune', '-f'],
-                                         check=False, capture_output=True)
-                        except Exception:
-                            pass
                 else:
                     print("ℹ️  No updates found, containers not restarted")
 

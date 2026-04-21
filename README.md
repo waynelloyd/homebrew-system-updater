@@ -345,6 +345,10 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.8
+- **Added**: Progress bar (spinner) for docker-compose up -d operations to show activity during container updates
+- **Improved**: Service restart logic now detects user services (systemctl --user) vs. system services (sudo systemctl) and uses the appropriate command
+
 ### v1.1.7
 - **Fixed**: Docker-compose updates now properly remove stopped dependent containers before recreating providers, preventing "container already exists" errors during sidecar dependant container updates
 
