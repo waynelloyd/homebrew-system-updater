@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.8" # Added progress bar for docker-compose up -d and improved service restart logic
+__version__ = "1.1.9" # Fixed: Service detection prioritizes system services; skips disabled/inactive services
 
 # Global list to store pending actions
 pending_actions = []
@@ -63,18 +63,88 @@ def is_podman():
 def is_user_service(service_name):
     """Determine if a service is a user service or system service.
     
-    Returns True if the service is a user service (can be controlled with systemctl --user),
-    False if it's a system service (requires sudo systemctl).
+    Since dnf needs-restarting reports system services, we prioritize those.
+    Checks the actual unit file location to determine service type.
+    Returns False if it's a system service (requires 'sudo systemctl'),
+    Returns True ONLY if it exists ONLY as a user service (not found in system).
+    """
+    # Check if service file exists in system location (highest priority)
+    system_paths = [
+        f'/usr/lib/systemd/system/{service_name}',
+        f'/etc/systemd/system/{service_name}',
+        f'/run/systemd/system/{service_name}',
+    ]
+    
+    for system_path in system_paths:
+        if os.path.exists(system_path):
+            return False  # It's a system service
+    
+    # If not found in system, check if it exists as a user service
+    user_paths = [
+        os.path.expanduser(f'~/.config/systemd/user/{service_name}'),
+        f'/usr/lib/systemd/user/{service_name}',
+        f'/run/systemd/user/{service_name}',
+    ]
+    
+    for user_path in user_paths:
+        if os.path.exists(user_path):
+            return True  # It's a user service
+    
+    # If path check fails, fall back to runtime check
+    try:
+        # Try system service check first (will fail if system service doesn't exist)
+        system_result = subprocess.run(['sudo', '-n', 'systemctl', 'status', service_name],
+                                      check=False, capture_output=True, text=True, timeout=2)
+        # If sudo check succeeds without password prompt, it's accessible as system service
+        if system_result.returncode in (0, 3):
+            return False
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    
+    # Fall back to checking user service
+    try:
+        user_result = subprocess.run(['systemctl', '--user', 'status', service_name],
+                                    check=False, capture_output=True, text=True, timeout=2)
+        return user_result.returncode in (0, 3)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    
+    # Default to system service if we can't determine
+    return False
+
+def should_restart_service(service_name, is_user_svc):
+    """Check if a service is enabled and/or running and should be restarted.
+
+    Args:
+        service_name: The systemd service name
+        is_user_svc: Boolean indicating if it's a user service (vs system service)
+    
+    Returns:
+        Tuple of (should_restart, enabled, active) booleans
+        - should_restart: True if service is enabled OR active (running)
+        - enabled: True if service is enabled for auto-start
+        - active: True if service is currently active/running
     """
     try:
-        # Try to get the service status as a user service
-        result = subprocess.run(['systemctl', '--user', 'status', service_name],
-                              check=False, capture_output=True, text=True)
-        # If exit code is 0 or 3 (inactive), it's a user service
-        # Exit code > 3 typically means the service doesn't exist for the user
-        return result.returncode in (0, 3)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+        prefix = ['systemctl', '--user'] if is_user_svc else ['sudo', 'systemctl']
+        
+        # Check if service is enabled
+        enabled_result = subprocess.run(prefix + ['is-enabled', service_name],
+                                       check=False, capture_output=True, text=True, timeout=2)
+        enabled = enabled_result.returncode == 0
+        
+        # Check if service is active (running)
+        active_result = subprocess.run(prefix + ['is-active', service_name],
+                                      check=False, capture_output=True, text=True, timeout=2)
+        active = active_result.returncode == 0
+        
+        # Restart only if service is enabled OR already running
+        should_restart = enabled or active
+        
+        return (should_restart, enabled, active)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        # If we can't check, assume we should restart (safe default)
+        return (True, True, True)
     
 def get_config_file():
     """Get the path to the configuration file"""
@@ -582,12 +652,37 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
                 for service in services:
                     service_name = service.strip()
                     if service_name:
-                        if is_user_service(service_name):
-                            run_command(['systemctl', '--user', 'restart', service_name],
-                                      f"Restarting {service_name}")
-                        else:
+                        # dnf reports system services, so restart system version first
+                        should_restart_sys, enabled_sys, active_sys = should_restart_service(service_name, False)
+                        
+                        if should_restart_sys:
                             run_command(['sudo', 'systemctl', 'restart', service_name],
-                                      f"Restarting {service_name}")
+                                      f"Restarting {service_name} (system)")
+                        else:
+                            print(f"\n{'='*50}")
+                            print(f"Skipping: {service_name} (system)")
+                            print(f"{'='*50}")
+                            print(f"⊘ {service_name} is disabled and inactive - skipping system restart")
+                        
+                        # Also check if a user version of the same service exists and is enabled/running
+                        # If the service package was updated, both versions share the updated libraries
+                        user_paths = [
+                            os.path.expanduser(f'~/.config/systemd/user/{service_name}'),
+                            f'/usr/lib/systemd/user/{service_name}',
+                            f'/run/systemd/user/{service_name}',
+                        ]
+                        user_service_exists = any(os.path.exists(path) for path in user_paths)
+                        
+                        if user_service_exists:
+                            should_restart_user, enabled_user, active_user = should_restart_service(service_name, True)
+                            if should_restart_user:
+                                run_command(['systemctl', '--user', 'restart', service_name],
+                                          f"Restarting {service_name} (user)")
+                            else:
+                                print(f"\n{'='*50}")
+                                print(f"Skipping: {service_name} (user)")
+                                print(f"{'='*50}")
+                                print(f"⊘ {service_name} user instance is disabled and inactive - skipping user restart")
             else:
                 print("ℹ️  Services not restarted. You can restart them manually later.")
                 pending_actions.append("Some services on your Fedora/RHEL system were not restarted. You may want to restart them manually.")

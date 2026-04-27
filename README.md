@@ -345,6 +345,11 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.9
+- **Fixed**: Service detection now correctly prioritizes system services over user services, preventing attempts to restart system services with `systemctl --user`
+- **Fixed**: Service restart now checks if services are enabled and/or running, skipping disabled/inactive services that don't need restart
+- **Improved**: Added status information (enabled/active) when skipping services that don't need restarting
+
 ### v1.1.8
 - **Added**: Progress bar (spinner) for docker-compose up -d operations to show activity during container updates
 - **Improved**: Service restart logic now detects user services (systemctl --user) vs. system services (sudo systemctl) and uses the appropriate command
