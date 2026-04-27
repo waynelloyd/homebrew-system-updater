@@ -5,8 +5,8 @@ class SystemUpdater < Formula
   # 1. Create a new release tag in the `system-updater` repository (e.g., v1.0.1).
   # 2. Get the .tar.gz URL and its SHA256 hash from the new release page.
   # 3. Update the `url` and `sha256` below.
-  url "https://github.com/waynelloyd/homebrew-system-updater/archive/refs/tags/v1.1.8.tar.gz"
-  sha256 "d21dac5bab905d26c4c9b986ac354f03719b6bfa95b68177caffd957faba2e1e"
+  url "https://github.com/waynelloyd/homebrew-system-updater/archive/refs/tags/v1.1.9.tar.gz"
+  sha256 "16c74f7a550b84273ab205eebd3f2ba99e72490b18cf570f847d072ea3704225"
   license "MIT"
 
   def install
