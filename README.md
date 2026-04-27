@@ -1,6 +1,6 @@
 # System Updater Script
 
-   ![GitHub stats](https://github-readme-stats.vercel.app/api?username=waynelloyd&repo=homebrew-system-updater&show_icons=true)
+![HitCount](https://hits.dwyl.com/waynelloyd/homebrew-system-updater.svg)
 
 A comprehensive cross-platform system update script that handles package management, service restarts, and Docker maintenance across Linux and macOS systems. Features auto-yes by default with optional interactive mode and granular control over update operations.
 
