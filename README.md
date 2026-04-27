@@ -348,7 +348,8 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 ### v1.1.9
 - **Fixed**: Service detection now correctly prioritizes system services over user services, preventing attempts to restart system services with `systemctl --user`
 - **Fixed**: Service restart now checks if services are enabled and/or running, skipping disabled/inactive services that don't need restart
-- **Improved**: Added status information (enabled/active) when skipping services that don't need restarting
+- **Fixed**: Services configured to refuse manual start/stop (dependency-only services like systemd-tmpfiles-setup.service) are now automatically detected and skipped to prevent restart failures
+- **Improved**: Added detailed status information when skipping services (disabled/inactive vs. dependency-only)
 
 ### v1.1.8
 - **Added**: Progress bar (spinner) for docker-compose up -d operations to show activity during container updates
