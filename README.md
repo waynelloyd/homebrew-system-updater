@@ -1,5 +1,7 @@
 # System Updater Script
 
+![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Fwaynelloyd%2Fhomebrew-system-updater&label=Visitors&labelColor=%23000&countColor=%23f00808&style=flat-square)
+
 A comprehensive cross-platform system update script that handles package management, service restarts, and Docker maintenance across Linux and macOS systems. Features auto-yes by default with optional interactive mode and granular control over update operations.
 
 ## Features
