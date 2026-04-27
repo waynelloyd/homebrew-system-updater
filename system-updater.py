@@ -59,6 +59,22 @@ def is_podman():
         return 'podman' in result.stdout.lower()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+def is_user_service(service_name):
+    """Determine if a service is a user service or system service.
+    
+    Returns True if the service is a user service (can be controlled with systemctl --user),
+    False if it's a system service (requires sudo systemctl).
+    """
+    try:
+        # Try to get the service status as a user service
+        result = subprocess.run(['systemctl', '--user', 'status', service_name],
+                              check=False, capture_output=True, text=True)
+        # If exit code is 0 or 3 (inactive), it's a user service
+        # Exit code > 3 typically means the service doesn't exist for the user
+        return result.returncode in (0, 3)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
     
 def get_config_file():
     """Get the path to the configuration file"""
