@@ -333,13 +333,55 @@ def detect_linux_distro():
     
     return 'linux_unknown'
 
-def update_vim_plugins(): # Modified: Removed unused auto_yes parameter
-    """Update Vim plugins using Vundle"""
+def update_vim_plugins_vundle():
+    """Update Vim plugins using Vundle (interactive).
+
+    Always run the interactive Vundle update command so plugin update progress
+    is visible when the script is executed from a shell.
+    """
     vundle_path = Path.home() / '.vim' / 'bundle' / 'Vundle.vim'
     if not vundle_path.exists():
-        return True # Skip silently if Vundle not installed
-        
-    return run_command(['vim', '+PluginUpdate', '+qall'], "Updating Vim plugins")
+        return True  # Skip silently if Vundle not installed
+
+    # Ensure vim binary exists
+    try:
+        subprocess.run(['vim', '--version'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = "vim not found; skipping Vim plugin (Vundle) update"
+        print(f"⚠️  {msg}")
+        failures.append(msg)
+        return True
+
+    # Always run the interactive command to show progress
+    cmd = ['vim', '+PluginUpdate', '+qall']
+    return run_command(cmd, "Updating Vim plugins (Vundle)")
+
+def update_vim_plugins_vimplug():
+    """Update Vim plugins using vim-plug (interactive).
+
+    Always run PlugUpgrade then PlugUpdate with the standard +commands so
+    plugin update progress is visible when executed from a shell.
+    """
+    plug_paths = [
+        Path.home() / '.vim' / 'autoload' / 'plug.vim',
+        Path.home() / '.local' / 'share' / 'nvim' / 'site' / 'autoload' / 'plug.vim',
+    ]
+
+    if not any(p.exists() for p in plug_paths):
+        return True  # vim-plug not installed, skip silently
+
+    # Ensure vim binary exists
+    try:
+        subprocess.run(['vim', '--version'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = "vim not found; skipping Vim plugin (vim-plug) update"
+        print(f"⚠️  {msg}")
+        failures.append(msg)
+        return True
+
+    # Always run the interactive commands to show progress
+    cmd = ['vim', '+PlugUpgrade', '+PlugUpdate', '+qall']
+    return run_command(cmd, "Updating Vim plugins (vim-plug)")
 
 def update_tmux_plugins(): # Modified: Removed unused auto_yes parameter
     """Update tmux plugins using TPM if installed (~/.tmux/plugins/tpm).
@@ -422,32 +464,70 @@ def update_oh_my_zsh(): # Modified: Removed unused auto_yes parameter
         return True
 
 def update_macos_system_software(): # Modified: Removed unused auto_yes parameter
-    """Update macOS system software using softwareupdate"""
+    """Update macOS system software using softwareupdate.
+
+    First checks for available updates (`softwareupdate -l`) and only runs
+    installation (`-ia`) if updates are present. This prevents printing a
+    successful-install message when nothing was updated.
+    """
+    # Announce check step (consistent with other tasks)
+    print(f"\n{'='*50}")
+    print("Running: Checking for macOS system updates")
+    print(f"Command: softwareupdate -l")
+    print(f"{'='*50}")
+
+    # Check for available updates first
+    try:
+        list_result = subprocess.run(['softwareupdate', '-l'], check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        msg = "softwareupdate command not found; skipping macOS system updates"
+        print(f"⚠️  {msg}")
+        failures.append(msg)
+        return True
+
+    list_out = (list_result.stdout or "") + "\n" + (list_result.stderr or "")
+    lower_list = list_out.lower()
+
+    # Detect common "no updates" phrases
+    no_update_phrases = ["no new software available", "no new", "no updates available", "none available"]
+    if any(phrase in lower_list for phrase in no_update_phrases):
+        print("✅ No macOS system updates available")
+        return True
+
+    # If we reach here, there are updates to install
     print(f"\n{'='*50}")
     print("Running: Installing macOS system updates")
     print(f"Command: softwareupdate -ia")
     print(f"{'='*50}")
-    
+
     try:
-        # Install all updates (softwareupdate -ia checks and installs)
-        result = subprocess.run(['softwareupdate', '-ia'], 
-                              check=True, capture_output=True, text=True)
-        
+        install_result = subprocess.run(['softwareupdate', '-ia'], check=False, capture_output=True, text=True)
+
+        install_out = (install_result.stdout or "") + "\n" + (install_result.stderr or "")
+        lower_install = install_out.lower()
+
         # Check if a restart is required
-        if any(phrase in result.stdout for phrase in ["restart", "reboot"]):
+        if any(phrase in lower_install for phrase in ["restart", "reboot"]):
             pending_actions.append("A restart is required to complete the installation of some macOS updates.")
 
-        # Only print success if updates were actually installed
-        if "No new software available" not in result.stdout and result.stdout.strip():
+        # If output indicates no updates, report accordingly
+        if any(phrase in lower_install for phrase in no_update_phrases) or not install_out.strip():
+            print("✅ No macOS system updates available")
+            return True
+
+        if install_result.returncode == 0:
             print("✅ macOS system updates installed successfully")
-        
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        # Check if it's just "no updates available"
-        if e.stdout and "No new software available" in e.stdout:
-            return True  # No updates, return silently
-        print(f"❌ Installing macOS system updates failed with exit code {e.returncode}")
+            return True
+        else:
+            print(f"❌ Installing macOS system updates failed with exit code {install_result.returncode}")
+            if install_result.stdout:
+                print(install_result.stdout)
+            if install_result.stderr:
+                print(install_result.stderr)
+            return False
+
+    except Exception as e:
+        print(f"❌ Installing macOS system updates failed: {e}")
         return False
 
 def update_homebrew_packages(): # Modified: Removed unused auto_yes parameter
@@ -1723,7 +1803,8 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             (update_mas_apps, not args.skip_mas), # Modified: Removed auto_yes
             (update_ruby_gems, not args.skip_pip), # Modified: Removed auto_yes
             (update_npm_packages, not args.skip_pip), # Modified: Removed auto_yes
-            (update_vim_plugins, not args.skip_vim), # Modified: Removed auto_yes
+            (update_vim_plugins_vundle, not args.skip_vim), # Modified: Removed auto_yes
+            (update_vim_plugins_vimplug, not args.skip_vim), # Added: vim-plug support
             (update_oh_my_zsh, not args.skip_omz), # Modified: Removed auto_yes
             (update_tmux_plugins, not args.skip_tmux), # Modified: Removed auto_yes
         ]
@@ -1750,6 +1831,8 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             (refresh_snaps, not args.skip_snap), # Modified: Removed auto_yes
             (update_flatpaks, not args.skip_flatpak), # Modified: Removed auto_yes
             (update_pip_packages, not args.skip_pip), # Modified: Removed auto_yes
+            (update_vim_plugins_vundle, not args.skip_vim), # Added: Vundle (Linux)
+            (update_vim_plugins_vimplug, not args.skip_vim), # Added: vim-plug (Linux)
             (update_tmux_plugins, not args.skip_tmux), # Modified: Removed auto_yes
             (update_firmware, not args.skip_firmware, auto_yes, args.apply_firmware),
         ]

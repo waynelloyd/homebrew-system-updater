@@ -16,7 +16,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **System Reboot Detection**: Prompts for reboot when required
 - **Pending Actions Summary**: Provides a clear, consolidated list of required follow-up actions, such as system reboots, at the end of the script.
 - **Docker Container Management**: Only restarts containers when updates are detected
-- **Vim Plugin Management**: Automatically updates Vim plugins (Vundle).
+- **Vim Plugin Management**: Automatically updates Vim plugins (Vundle and vim-plug).
 - **Tmux Plugin Management**: Automatically updates tmux plugins via TPM if `~/.tmux/plugins/tpm` is present.
 - **Oh My Zsh**: Keeps your Oh My Zsh installation up-to-date (macOS only).
 - **Graceful Fallbacks**: Skips unavailable package managers without errors
@@ -81,7 +81,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
-- **Vim Plugins**: `vim +PluginUpdate +qall` (Vundle, if installed)
+- **Vim Plugins**: Vundle: `vim +PluginUpdate +qall` (if installed); vim-plug: `vim -Es -c "PlugUpgrade" -c "PlugUpdate" -c "qa!"` (if installed)
 - **Tmux Plugins**: `~/.tmux/plugins/tpm/update_plugins all` (TPM, if installed)
 - **Oh My Zsh**: `omz update` (if installed)
 - **Docker**: Compose pull/restart + system prune
@@ -258,7 +258,7 @@ system-updater --help
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
-- `--skip-vim` - Skip Vim plugin updates
+- `--skip-vim` - Skip Vim plugin updates (both Vundle and vim-plug)
 - `--skip-tmux` - Skip tmux plugin updates (TPM)
 - `--skip-omz` - Skip Oh My Zsh update (macOS only)
 - `--skip-firmware` - Skip firmware updates (Linux only)
@@ -346,6 +346,14 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.10
+- **Added**: Support for vim-plug alongside Vundle. The script now detects common vim-plug locations for Vim and Neovim and updates plugins when found.
+- **Changed**: Vim update functions renamed for clarity: `update_vim_plugins_vundle` (Vundle) and `update_vim_plugins_vimplug` (vim-plug).
+- **Changed**: Both Vundle and vim-plug now stream vim's output to the terminal (via the same `run_command` path) so plugin update progress is visible and consistent.
+- **Changed**: `--skip-vim` now skips both Vundle and vim-plug update steps.
+- **Improved**: macOS softwareupdate step now announces "Checking for macOS system updates" and only runs the installer if updates are detected; prints a no-updates message when none are available and records restart requirements as pending actions.
+- **Changed**: Vim update steps now prefer the interactive +commands (e.g. `+PlugUpdate`, `+PluginUpdate`) so progress is shown when running from a shell.
 
 ### v1.1.9
 - **Fixed**: Service detection now correctly prioritizes system services over user services, preventing attempts to restart system services with `systemctl --user`
