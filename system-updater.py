@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.9" # Fixed: Service detection prioritizes system services; skips disabled/inactive services
+__version__ = "1.1.10" # Fixed: Service detection prioritizes system services; skips disabled/inactive services
 
 # Global list to store pending actions
 pending_actions = []
