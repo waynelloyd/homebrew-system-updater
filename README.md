@@ -347,6 +347,12 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ## Changelog
 
+### v1.1.11
+- **Added**: Hard-coded vim-plug parallelism to 4; `PlugUpdate` now runs with `--sync 4` to limit parallelism during plugin updates.
+- **Changed**: Vim-plug update command uses the interactive form to show progress: `+PlugUpgrade +PlugUpdate --sync 4 +qall`.
+- **Docs**: README updated to document the new vim-plug invocation.
+- **Note**: Vundle behavior unchanged.
+
 ### v1.1.10
 - **Added**: Support for vim-plug alongside Vundle. The script now detects common vim-plug locations for Vim and Neovim and updates plugins when found.
 - **Changed**: Vim update functions renamed for clarity: `update_vim_plugins_vundle` (Vundle) and `update_vim_plugins_vimplug` (vim-plug).
