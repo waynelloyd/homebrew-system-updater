@@ -380,7 +380,7 @@ def update_vim_plugins_vimplug():
         return True
 
     # Always run the interactive commands to show progress
-    cmd = ['vim', '+PlugUpgrade', '+PlugUpdate', '+qall']
+    cmd = ['vim', '+PlugUpgrade', '+PlugUpdate --sync 4', '+qall']
     return run_command(cmd, "Updating Vim plugins (vim-plug)")
 
 def update_tmux_plugins(): # Modified: Removed unused auto_yes parameter

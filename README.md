@@ -81,7 +81,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
-- **Vim Plugins**: Vundle: `vim +PluginUpdate +qall` (if installed); vim-plug: `vim -Es -c "PlugUpgrade" -c "PlugUpdate" -c "qa!"` (if installed)
+- **Vim Plugins**: Vundle: `vim +PluginUpdate +qall` (if installed); vim-plug: `vim +PlugUpgrade +PlugUpdate --sync +qall` (if installed)
 - **Tmux Plugins**: `~/.tmux/plugins/tpm/update_plugins all` (TPM, if installed)
 - **Oh My Zsh**: `omz update` (if installed)
 - **Docker**: Compose pull/restart + system prune
