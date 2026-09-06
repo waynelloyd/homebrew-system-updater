@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 System Update Script
-Handles updates for Fedora/Ubuntu, snap refresh, docker-compose pull, and docker system prune
+Handles updates for Omarchy/Fedora/Ubuntu, snap refresh, docker-compose pull, and docker system prune
 """
 
 import subprocess
@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.11"
+__version__ = "1.1.12"
 
 # Global list to store pending actions
 pending_actions = []
@@ -36,6 +36,8 @@ def run_command(command, description, auto_yes=False):
             # Add -y flag for commands that support it
             if any(cmd in command for cmd in ['apt', 'dnf', 'yum']):
                 command.append('-y')
+            elif any(cmd in command for cmd in ['pacman', 'yay']):
+                command.append('--noconfirm')
         
         subprocess.run(command, check=True, capture_output=False) # Modified: Removed unused 'result =' assignment
         print(f"✅ {description} completed successfully")
@@ -314,7 +316,11 @@ def detect_linux_distro():
     try:
         with open('/etc/os-release', 'r') as f:
             content = f.read().lower()
-            if 'ubuntu' in content or 'debian' in content:
+            if 'id=omarchy' in content or 'name="omarchy"' in content:
+                return 'omarchy'
+            elif 'id=arch' in content:
+                return 'arch'
+            elif 'ubuntu' in content or 'debian' in content:
                 return 'ubuntu'
             elif 'fedora' in content:
                 return 'fedora'
@@ -330,8 +336,45 @@ def detect_linux_distro():
         return 'fedora'
     elif os.path.exists('/usr/bin/yum'):
         return 'rhel'
+    elif os.path.exists('/usr/bin/pacman'):
+        return 'arch'
     
     return 'linux_unknown'
+
+def update_omarchy_packages(auto_yes=False):
+    """Update Omarchy and its system packages using the supported Omarchy command."""
+    try:
+        subprocess.run(['omarchy', '--help'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = "omarchy command not found; cannot update Omarchy packages"
+        print(f"❌ {msg}")
+        failures.append(msg)
+        return False
+
+    command = ['omarchy', 'update']
+    if auto_yes:
+        command.append('-y')
+    return run_command(command, "Updating Omarchy and system packages")
+
+def update_arch_packages(auto_yes=False):
+    """Update Arch Linux packages with yay when available, otherwise pacman."""
+    try:
+        subprocess.run(['pacman', '--version'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = "pacman command not found; cannot update Arch Linux packages"
+        print(f"❌ {msg}")
+        failures.append(msg)
+        return False
+
+    try:
+        subprocess.run(['yay', '--version'], check=True, capture_output=True)
+        command = ['yay', '-Syu']
+        description = "Updating Arch Linux packages and AUR packages (yay)"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        command = ['sudo', 'pacman', '-Syu']
+        description = "Updating Arch Linux packages (pacman)"
+
+    return run_command(command, description, auto_yes)
 
 def update_vim_plugins_vundle():
     """Update Vim plugins using Vundle (interactive).
@@ -1541,15 +1584,48 @@ def docker_system_prune(auto_yes=False):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True  # Skip silently if not installed
 
-    print(f"\n{'='*50}")
-    print("Running: Cleaning up Docker system (prune)")
-    print(f"Command: docker system prune -f")
-    print(f"{'='*50}")
-
     try:
-        # First, try standard prune
-        result = subprocess.run(['docker', 'system', 'prune', '-f'],
-                               check=False, capture_output=True, text=True)
+        docker_prefix = ['docker']
+
+        def run_docker(*args):
+            return subprocess.run(docker_prefix + list(args),
+                                  check=False, capture_output=True, text=True)
+
+        def permission_denied(result):
+            output = f"{result.stdout}\n{result.stderr}".lower()
+            return any(message in output for message in (
+                "permission denied",
+                "cannot connect to the docker daemon at unix:///var/run/docker.sock",
+            ))
+
+        def failure_message(result):
+            msg = f"Docker system prune failed with exit code {result.returncode}"
+            if permission_denied(result):
+                msg += "; Docker requires access to a root-owned socket. Add the user to the docker group or run with passwordless sudo"
+            detail = (result.stderr or result.stdout).strip()
+            if detail:
+                msg += f": {detail}"
+            return msg
+
+        print(f"\n{'='*50}")
+        print("Running: Cleaning up Docker system (prune)")
+        print("Command: docker system prune -f")
+        print(f"{'='*50}")
+
+        # Root-owned Docker daemons commonly expose a socket that is only
+        # accessible to root or members of the docker group.
+        result = run_docker('system', 'prune', '-f')
+        if result.returncode != 0 and permission_denied(result) and getattr(os, 'geteuid', lambda: 1)() != 0:
+            print("⚠️  Docker socket access was denied; retrying with sudo...")
+            try:
+                docker_prefix = ['sudo', '-n', 'docker']
+                elevated_result = run_docker('system', 'prune', '-f')
+                if elevated_result.returncode == 0:
+                    print("✅ Docker system prune completed successfully with sudo")
+                    return True
+                result = elevated_result
+            except FileNotFoundError:
+                pass
 
         if result.returncode == 0:
             print("✅ Docker system prune completed successfully")
@@ -1559,31 +1635,27 @@ def docker_system_prune(auto_yes=False):
             print("⚠️  Detected dependent container issues, attempting more aggressive cleanup...")
 
             # Remove stopped containers
-            subprocess.run(['docker', 'container', 'prune', '-f'],
-                          check=False, capture_output=True)
+            run_docker('container', 'prune', '-f')
 
             # Remove dangling images
-            subprocess.run(['docker', 'image', 'prune', '-f'],
-                          check=False, capture_output=True)
+            run_docker('image', 'prune', '-f')
 
             # Remove unused volumes
-            subprocess.run(['docker', 'volume', 'prune', '-f'],
-                          check=False, capture_output=True)
+            run_docker('volume', 'prune', '-f')
 
             # Try system prune again
-            result = subprocess.run(['docker', 'system', 'prune', '-f'],
-                                   check=False, capture_output=True, text=True)
+            result = run_docker('system', 'prune', '-f')
 
             if result.returncode == 0:
                 print("✅ Docker system cleanup completed after retry")
                 return True
             else:
-                msg = f"Docker system prune failed with exit code {result.returncode} (command: docker system prune -f)"
+                msg = failure_message(result)
                 print(f"⚠️  {msg}")
                 failures.append(msg)
                 return False
         else:
-            msg = f"Docker system prune failed with exit code {result.returncode} (command: docker system prune -f)"
+            msg = failure_message(result)
             print(f"❌ {msg}")
             failures.append(msg)
             return False
@@ -1737,7 +1809,7 @@ Command-line flags override config when provided. Run `--help` to see platform-s
                             help='Skip Mac App Store updates (macOS only)')
         parser.add_argument('--skip-omz', action='store_true', default=config_get_bool(config, 'skip-omz', 'skip_omz', False),
                             help='Skip Oh My Zsh update')
-    elif os_type in ['ubuntu', 'fedora', 'rhel']:
+    elif os_type in ['omarchy', 'arch', 'ubuntu', 'fedora', 'rhel']:
         parser.add_argument('--skip-snap', action='store_true', default=config_get_bool(config, 'skip-snap', 'skip_snap', False),
                             help='Skip snap refresh (Linux only)')
         parser.add_argument('--skip-flatpak', action='store_true', default=config_get_bool(config, 'skip-flatpak', 'skip_flatpak', False),
@@ -1815,11 +1887,17 @@ Command-line flags override config when provided. Run `--help` to see platform-s
                 if task(*task_args):
                     success_count += 1
 
-    elif os_type in ['ubuntu', 'fedora', 'rhel']:
+    elif os_type in ['omarchy', 'arch', 'ubuntu', 'fedora', 'rhel']:
         # System packages
         if not args.skip_os_updates:
             total_tasks += 1
-            if os_type == 'ubuntu':
+            if os_type == 'omarchy':
+                if update_omarchy_packages(auto_yes):
+                    success_count += 1
+            elif os_type == 'arch':
+                if update_arch_packages(auto_yes):
+                    success_count += 1
+            elif os_type == 'ubuntu':
                 run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
                 if run_command(['sudo', 'apt', 'upgrade'], "Upgrading packages", auto_yes):
                     success_count += 1

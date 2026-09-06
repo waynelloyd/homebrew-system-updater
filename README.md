@@ -7,7 +7,7 @@ A comprehensive cross-platform system update script that handles package managem
 ## Features
 
 ### 🖥️ Cross-Platform Support
-- **Linux**: Ubuntu, Fedora, RHEL/CentOS
+- **Linux**: Ubuntu, Fedora, RHEL/CentOS, Arch & Omarchy
 - **macOS**: Full macOS support with multiple package managers
 - **Automatic OS Detection**: Runs appropriate commands based on detected system
 
@@ -23,11 +23,7 @@ A comprehensive cross-platform system update script that handles package managem
 
 ## Functionality by Operating System
 
-### 🐧 Linux (Ubuntu/Debian)
-
-#### System Packages
-- `sudo apt update` - Update package lists
-- `sudo apt upgrade` - Upgrade installed packages
+### 🐧 Linux (All Distributions)
 
 #### Additional Package Managers
 - **Snap Packages**: `sudo snap refresh`
@@ -35,8 +31,17 @@ A comprehensive cross-platform system update script that handles package managem
 - **Firmware**: `fwupdmgr refresh && fwupdmgr get-updates` — the script defaults to auto-yes and will automatically apply firmware updates when detected (it will run `fwupdmgr refresh --force` then `fwupdmgr update` when applying). If you prefer prompts, run the script with `-i/--interactive` to confirm before applying. Use `--apply-firmware` or set `"apply-firmware": true` in the config to enable unattended apply; use `--skip-firmware` to skip firmware checks entirely.
 
 #### Developer Tools
+These tasks are not distro-specific and run on supported Linux variants:
 - **pip3**: Updates outdated Python packages
 - **Docker**: Compose pull/restart + system prune
+
+---
+
+### 🐧 Linux (Ubuntu/Debian)
+
+#### System Packages
+- `sudo apt update` - Update package lists
+- `sudo apt upgrade` - Upgrade installed packages
 
 ---
 
@@ -50,14 +55,20 @@ A comprehensive cross-platform system update script that handles package managem
   - **Automatic service restart with user confirmation** (or use `--service-restart` to skip confirmation)
   - System reboot prompt with 10-second countdown
 
-#### Additional Package Managers
-- **Snap Packages**: `sudo snap refresh`
-- **Flatpak**: `flatpak update --appstream && flatpak update -y`
-- **Firmware**: `fwupdmgr refresh && fwupdmgr get-updates` — the script defaults to auto-yes and will automatically apply firmware updates when detected (it will run `fwupdmgr refresh --force` then `fwupdmgr update` when applying). If you prefer prompts, run the script with `-i/--interactive` to confirm before applying. Use `--apply-firmware` or set `"apply-firmware": true` in the config to enable unattended apply; use `--skip-firmware` to skip firmware checks entirely.
+---
 
-#### Developer Tools
-- **pip3**: Updates outdated Python packages
-- **Docker**: Compose pull/restart + system prune
+### 🐧 Linux (Arch)
+
+#### System Packages
+- `yay -Syu --noconfirm` - Update Arch and AUR packages when `yay` is installed
+- `sudo pacman -Syu --noconfirm` - Update Arch packages when `yay` is unavailable
+
+---
+
+### 🐧 Linux (Omarchy)
+
+#### System Packages
+- `omarchy update -y` - Update Omarchy and the underlying Arch Linux system without prompting
 
 ---
 
@@ -77,7 +88,7 @@ A comprehensive cross-platform system update script that handles package managem
 #### App Stores & Applications
 - **Mac App Store**: `mas outdated && mas upgrade` (via mas CLI)
 
-#### Developer Tools
+#### macOS Developer Tools
 - **Ruby Gems**: `gem outdated --user-install && gem update --user-install` (user gems only)
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
@@ -111,6 +122,7 @@ If the compose file cannot be parsed, the script falls back to a full stack rest
 
 ### Docker Maintenance
 - **System Cleanup**: `docker system prune` with auto-confirmation (dangling images only — layer cache is preserved to ensure accurate update detection on subsequent runs)
+- If Docker uses a root-owned socket, the updater retries the cleanup with non-interactive `sudo`. To avoid a failed retry, add the user to the `docker` group or configure passwordless sudo for Docker.
 
 ---
 
@@ -254,7 +266,7 @@ system-updater --help
 
 **Available Options:**
 - `-i, --interactive` - Interactive mode with prompts (default is auto-yes)
-- `--skip-os-updates` - Skip system package updates
+- `--skip-os-updates` - Skip system package updates (including `omarchy update` on Omarchy and pacman/yay on Arch)
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
@@ -346,6 +358,11 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.12
+- **Added**: Omarchy detection and system updates via the supported `omarchy update` command.
+- **Added**: Arch Linux package updates using `yay` when available, with `pacman` fallback.
+- **Docs**: Added Omarchy and Arch package-update support and CLI behavior.
 
 ### v1.1.11
 - **Added**: Hard-coded vim-plug parallelism to 4; `PlugUpdate` now runs with `--sync 4` to limit parallelism during plugin updates.
