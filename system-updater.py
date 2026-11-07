@@ -10,6 +10,7 @@ import os
 import argparse
 import platform
 import json
+import codecs
 from pathlib import Path
 import time
 import itertools
@@ -752,6 +753,37 @@ def update_npm_packages(): # Modified: Removed unused auto_yes parameter
     
     return success
 
+def run_dnf_services_check():
+    command = ['dnf', 'needs-restarting', '-s']
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               stdin=None, text=True)
+    stderr_output = []
+
+    def forward_stderr():
+        decoder = codecs.getincrementaldecoder('utf-8')('replace')
+        while True:
+            chunk = os.read(process.stderr.fileno(), 4096)
+            if not chunk:
+                break
+            stderr_output.append(decoder.decode(chunk))
+            sys.stderr.write(stderr_output[-1])
+            sys.stderr.flush()
+        remaining = decoder.decode(b'', final=True)
+        if remaining:
+            stderr_output.append(remaining)
+            sys.stderr.write(remaining)
+            sys.stderr.flush()
+
+    stderr_thread = threading.Thread(target=forward_stderr)
+    stderr_thread.start()
+    stdout = process.stdout.read()
+    returncode = process.wait()
+    stderr_thread.join()
+    process.stdout.close()
+    process.stderr.close()
+    return subprocess.CompletedProcess(command, returncode, stdout, ''.join(stderr_output))
+
+
 def check_fedora_restart_needs(auto_yes=False, service_restart=False):
     """Check for services and system restart needs on Fedora/RHEL systems"""
     # Check if dnf is available
@@ -766,9 +798,7 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
     print(f"{'='*50}")
 
     # Check for services that need restarting
-    services_result = subprocess.run(['dnf', 'needs-restarting', '-s'],
-                                     stdout=subprocess.PIPE, stderr=None, stdin=None,
-                                     text=True, check=False)
+    services_result = run_dnf_services_check()
 
     if services_result.returncode == 0:
         print("✅ No services need restarting")
@@ -839,9 +869,8 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
                                    stdout=subprocess.PIPE, stderr=None, stdin=None,
                                    text=True, check=False)
 
-    if reboot_result.returncode == 0:
-        print("✅ System reboot not required")
-    elif reboot_result.returncode == 1:
+    reboot_required_warning = "should not be restarted but require a reboot" in services_result.stderr.lower()
+    if reboot_result.returncode == 1 or reboot_required_warning:
         print("🚨 SYSTEM REBOOT REQUIRED")
         print("   Some updates require a system restart to take effect")
         pending_actions.append("A system reboot is required for some updates to take effect on your Fedora/RHEL system.")
@@ -863,6 +892,8 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
                     print("❌ Failed to initiate reboot")
             else:
                 print("ℹ️  System reboot postponed. Please reboot when convenient.")
+    elif reboot_result.returncode == 0:
+        print("✅ System reboot not required")
     else:
         print("⚠️  Could not determine if system reboot is needed")
 
