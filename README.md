@@ -52,6 +52,7 @@ These tasks are not distro-specific and run on supported Linux variants:
 - **Smart Restart Detection**: Uses `needs-restarting` to detect:
   - Services requiring restart (`needs-restarting -s`)
   - System reboot requirements (`needs-restarting -r`)
+  - DNF prompts and diagnostics are shown in the terminal and can be answered interactively
   - **Automatic service restart with user confirmation** (or use `--service-restart` to skip confirmation)
   - System reboot prompt with 10-second countdown
 
@@ -358,6 +359,9 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.13
+- **Fixed**: Fedora/RHEL `dnf needs-restarting` checks now show DNF prompts and diagnostics in the terminal while preserving service-list parsing, preventing repository signing-key prompts from appearing as a hang.
 
 ### v1.1.12
 - **Added**: Omarchy detection and system updates via the supported `omarchy update` command.

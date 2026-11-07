@@ -17,7 +17,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.12"
+__version__ = "1.1.13"
 
 # Global list to store pending actions
 pending_actions = []
@@ -767,7 +767,8 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
 
     # Check for services that need restarting
     services_result = subprocess.run(['dnf', 'needs-restarting', '-s'],
-                                     capture_output=True, text=True, check=False)
+                                     stdout=subprocess.PIPE, stderr=None, stdin=None,
+                                     text=True, check=False)
 
     if services_result.returncode == 0:
         print("✅ No services need restarting")
@@ -832,12 +833,11 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
             print("✅ No services need restarting")
     else:
         print("⚠️  Could not check service restart requirements")
-        if services_result.stderr:
-            print(f"Error details: {services_result.stderr.strip()}")
 
     # Check if system reboot is needed
     reboot_result = subprocess.run(['dnf', 'needs-restarting', '-r'],
-                                   capture_output=True, text=True, check=False)
+                                   stdout=subprocess.PIPE, stderr=None, stdin=None,
+                                   text=True, check=False)
 
     if reboot_result.returncode == 0:
         print("✅ System reboot not required")
@@ -865,8 +865,6 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
                 print("ℹ️  System reboot postponed. Please reboot when convenient.")
     else:
         print("⚠️  Could not determine if system reboot is needed")
-        if reboot_result.stderr:
-            print(f"Error details: {reboot_result.stderr.strip()}")
 
     return True
 
