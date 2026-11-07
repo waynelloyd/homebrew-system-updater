@@ -362,6 +362,7 @@ This script is provided as-is for system maintenance purposes. Use at your own d
 
 ### v1.1.13
 - **Fixed**: Fedora/RHEL `dnf needs-restarting` checks now show DNF prompts and diagnostics in the terminal while preserving service-list parsing, preventing repository signing-key prompts from appearing as a hang.
+- **Fixed**: Fedora/RHEL reboot detection now recognizes DNF's warning that services require a reboot, even when `dnf needs-restarting -r` reports no reboot is required.
 
 ### v1.1.12
 - **Added**: Omarchy detection and system updates via the supported `omarchy update` command.
