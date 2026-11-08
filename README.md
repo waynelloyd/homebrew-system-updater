@@ -17,6 +17,7 @@ A comprehensive cross-platform system update script that handles package managem
 - **Pending Actions Summary**: Provides a clear, consolidated list of required follow-up actions, such as system reboots, at the end of the script.
 - **Docker Container Management**: Only restarts containers when updates are detected
 - **Vim Plugin Management**: Automatically updates Vim plugins (Vundle and vim-plug).
+- **VS Code Extensions**: Updates extensions for installed VS Code stable or Insiders builds and reports extensions whose versions changed.
 - **Tmux Plugin Management**: Automatically updates tmux plugins via TPM if `~/.tmux/plugins/tpm` is present.
 - **Oh My Zsh**: Keeps your Oh My Zsh installation up-to-date (macOS only).
 - **Graceful Fallbacks**: Skips unavailable package managers without errors
@@ -33,6 +34,7 @@ A comprehensive cross-platform system update script that handles package managem
 #### Developer Tools
 These tasks are not distro-specific and run on supported Linux variants:
 - **pip3**: Updates outdated Python packages
+- **VS Code Extensions**: Runs `code --update-extensions` (or `code-insiders --update-extensions`) when VS Code is installed and lists extensions whose versions changed.
 - **Docker**: Compose pull/restart + system prune
 
 ---
@@ -48,7 +50,7 @@ These tasks are not distro-specific and run on supported Linux variants:
 ### 🐧 Linux (Fedora/RHEL)
 
 #### System Packages
-- `sudo dnf upgrade` - Update all packages
+- `sudo dnf upgrade --refresh` - Refresh repository metadata and update all packages
 - **Smart Restart Detection**: Uses `needs-restarting` to detect:
   - Services requiring restart (`needs-restarting -s`)
   - System reboot requirements (`needs-restarting -r`)
@@ -94,6 +96,7 @@ These tasks are not distro-specific and run on supported Linux variants:
 - **npm**: Global and user packages (`npm outdated -g && npm update -g`, `npm outdated && npm update`)
 - **pip3**: System and user Python packages with separate handling
 - **Vim Plugins**: Vundle: `vim +PluginUpdate +qall` (if installed); vim-plug: `vim +PlugUpgrade +PlugUpdate --sync +qall` (if installed)
+- **VS Code Extensions**: Updates installed extensions with `code --update-extensions` when VS Code is installed and reports extension IDs whose versions changed. On macOS, the script can also use the CLI bundled in the standard VS Code app location when `code` is not on `PATH`.
 - **Tmux Plugins**: `~/.tmux/plugins/tpm/update_plugins all` (TPM, if installed)
 - **Oh My Zsh**: `omz update` (if installed)
 - **Docker**: Compose pull/restart + system prune
@@ -205,6 +208,9 @@ system-updater --skip-pip
 # Skip Vim plugin updates
 system-updater --skip-vim
 
+# Skip Visual Studio Code extension updates
+system-updater --skip-vscode
+
 # Skip Tmux plugin updates (TPM)
 system-updater --skip-tmux
 
@@ -225,6 +231,7 @@ Example `~/.config/system-updater/config.json`:
 ```json
 {
   "skip-docker-prune": true,
+  "skip-vscode": false,
   "skip-tmux": true,
   "apply-firmware": false
 }
@@ -271,6 +278,7 @@ system-updater --help
 - `--skip-snap` - Skip snap refresh (Linux only)
 - `--skip-flatpak` - Skip Flatpak updates (Linux only)
 - `--skip-pip` - Skip pip package updates
+- `--skip-vscode` - Skip Visual Studio Code extension updates
 - `--skip-vim` - Skip Vim plugin updates (both Vundle and vim-plug)
 - `--skip-tmux` - Skip tmux plugin updates (TPM)
 - `--skip-omz` - Skip Oh My Zsh update (macOS only)
@@ -343,6 +351,13 @@ Command: brew update
 📊 SUMMARY
 ==================================================
 Tasks completed successfully: 10/11
+Tasks completed (10):
+  - update macos system software
+  - update homebrew packages
+  - update mas apps
+  ...
+Tasks skipped (not installed or no work configured): 1
+  - update vim plugins vundle
 ⚠️  Some tasks failed or need attention. Check the 'ISSUES / FAILURES' and output above for details.
 ```
 
@@ -359,6 +374,11 @@ Tasks completed successfully: 10/11
 This script is provided as-is for system maintenance purposes. Use at your own discretion and always test in a safe environment first.
 
 ## Changelog
+
+### v1.1.14
+- **Added**: VS Code stable and Insiders extension updates, with changed extension versions reported; macOS can use the app-bundled CLI when it is not on `PATH`.
+- **Changed**: Fedora/RHEL package upgrades now refresh repository metadata before installing updates (`dnf upgrade --refresh`).
+- **Improved**: The task summary counts only tasks that ran and lists completed, skipped, and option-disabled tasks.
 
 ### v1.1.13
 - **Fixed**: Fedora/RHEL `dnf needs-restarting` checks now show DNF prompts and diagnostics in the terminal while preserving service-list parsing, preventing repository signing-key prompts from appearing as a hang.

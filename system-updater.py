@@ -11,6 +11,7 @@ import argparse
 import platform
 import json
 import codecs
+import shutil
 from pathlib import Path
 import time
 import itertools
@@ -18,7 +19,7 @@ import threading
 import yaml
 
 # Define the script version. Remember to update this for each new release.
-__version__ = "1.1.13"
+__version__ = "1.1.14"
 
 # Global list to store pending actions
 pending_actions = []
@@ -385,7 +386,7 @@ def update_vim_plugins_vundle():
     """
     vundle_path = Path.home() / '.vim' / 'bundle' / 'Vundle.vim'
     if not vundle_path.exists():
-        return True  # Skip silently if Vundle not installed
+        return None  # Skip if Vundle is not installed
 
     # Ensure vim binary exists
     try:
@@ -394,7 +395,7 @@ def update_vim_plugins_vundle():
         msg = "vim not found; skipping Vim plugin (Vundle) update"
         print(f"⚠️  {msg}")
         failures.append(msg)
-        return True
+        return None
 
     # Always run the interactive command to show progress
     cmd = ['vim', '+PluginUpdate', '+qall']
@@ -412,7 +413,7 @@ def update_vim_plugins_vimplug():
     ]
 
     if not any(p.exists() for p in plug_paths):
-        return True  # vim-plug not installed, skip silently
+        return None  # Skip if vim-plug is not installed
 
     # Ensure vim binary exists
     try:
@@ -421,7 +422,7 @@ def update_vim_plugins_vimplug():
         msg = "vim not found; skipping Vim plugin (vim-plug) update"
         print(f"⚠️  {msg}")
         failures.append(msg)
-        return True
+        return None
 
     # Always run the interactive commands to show progress
     cmd = ['vim', '+PlugUpgrade', '+PlugUpdate --sync 4', '+qall']
@@ -437,7 +438,7 @@ def update_tmux_plugins(): # Modified: Removed unused auto_yes parameter
     """
     tpm_base = Path.home() / '.tmux' / 'plugins' / 'tpm'
     if not tpm_base.exists():
-        return True  # TPM not installed, skip silently
+        return None  # Skip if TPM is not installed
 
     # Common candidate locations for the update script
     candidates = [
@@ -495,7 +496,7 @@ def update_oh_my_zsh(): # Modified: Removed unused auto_yes parameter
     oh_my_zsh_path = Path.home() / '.oh-my-zsh'
     upgrade_script = oh_my_zsh_path / 'tools' / 'upgrade.sh'
     if not oh_my_zsh_path.exists() or not upgrade_script.exists():
-        return True # Skip silently if not installed or upgrade script missing
+        return None  # Skip if Oh My Zsh is not installed
 
     # Run the upgrade script directly with zsh
     command = ['zsh', str(upgrade_script)]
@@ -527,7 +528,7 @@ def update_macos_system_software(): # Modified: Removed unused auto_yes paramete
         msg = "softwareupdate command not found; skipping macOS system updates"
         print(f"⚠️  {msg}")
         failures.append(msg)
-        return True
+        return None
 
     list_out = (list_result.stdout or "") + "\n" + (list_result.stderr or "")
     lower_list = list_out.lower()
@@ -580,7 +581,7 @@ def update_homebrew_packages(): # Modified: Removed unused auto_yes parameter
     try:
         subprocess.run(['brew', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if Homebrew is not installed
     
     success = True
     
@@ -612,7 +613,7 @@ def update_mas_apps(): # Modified: Removed unused auto_yes parameter
     try:
         subprocess.run(['mas', 'version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if mas is not installed
     
     # Check for outdated apps
     print(f"\n{'='*50}")
@@ -644,16 +645,16 @@ def update_ruby_gems(): # Modified: Removed unused auto_yes parameter
     try:
         subprocess.run(['gem', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if RubyGems is not installed
     
     # Check if user has any gems installed first
     try:
         list_result = subprocess.run(['gem', 'list', '--user-install'], 
                                    check=True, capture_output=True, text=True)
         if not list_result.stdout.strip() or "no gems" in list_result.stdout.lower():
-            return True  # No user gems installed, skip silently
+            return None  # Skip if no user gems are installed
     except subprocess.CalledProcessError:
-        return True  # Can't check, skip silently
+        return None  # Skip if user gems cannot be checked
     
     # Update user gems only (avoid system permission issues)
     print(f"\n{'='*50}")
@@ -674,7 +675,7 @@ def update_ruby_gems(): # Modified: Removed unused auto_yes parameter
             return True
         
     except subprocess.CalledProcessError:
-        return True  # Skip silently if command fails
+        return None  # Skip if outdated gems cannot be checked
 
 def update_npm_packages(): # Modified: Removed unused auto_yes parameter
     """Update global and user npm packages"""
@@ -682,7 +683,7 @@ def update_npm_packages(): # Modified: Removed unused auto_yes parameter
     try:
         subprocess.run(['npm', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if npm is not installed
     
     success = True
     
@@ -753,6 +754,80 @@ def update_npm_packages(): # Modified: Removed unused auto_yes parameter
     
     return success
 
+def update_vscode_extensions():
+    """Update extensions for installed VS Code stable and Insiders builds."""
+    commands = []
+    for executable, display_name, app_name in (
+        ('code', 'VS Code', 'Visual Studio Code.app'),
+        ('code-insiders', 'VS Code Insiders', 'Visual Studio Code - Insiders.app'),
+    ):
+        command = shutil.which(executable)
+        if not command and detect_os() == 'macos':
+            app_cli_paths = [
+                Path('/Applications') / app_name / 'Contents' / 'Resources' / 'app' / 'bin' / executable,
+                Path.home() / 'Applications' / app_name / 'Contents' / 'Resources' / 'app' / 'bin' / executable,
+            ]
+            command = next((str(path) for path in app_cli_paths if path.is_file()), None)
+        if command:
+            commands.append((display_name, command))
+
+    if not commands:
+        return None
+
+    def get_extension_versions(command, display_name):
+        try:
+            result = subprocess.run(
+                [command, '--list-extensions', '--show-versions'],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            msg = f"Could not list {display_name} extensions (exit code {e.returncode})"
+            print(f"⚠️  {msg}")
+            failures.append(msg)
+            return None
+        except FileNotFoundError:
+            msg = f"Could not list {display_name} extensions: command not found ({command})"
+            print(f"⚠️  {msg}")
+            failures.append(msg)
+            return None
+
+        versions = {}
+        for line in result.stdout.splitlines():
+            extension_id, separator, version = line.strip().rpartition('@')
+            if separator:
+                versions[extension_id.lower()] = (extension_id, version)
+        return versions
+
+    success = True
+    for display_name, command in commands:
+        before_versions = get_extension_versions(command, display_name)
+        update_success = run_command(
+            [command, '--update-extensions'],
+            f"Updating {display_name} extensions",
+        )
+        after_versions = get_extension_versions(command, display_name)
+
+        if before_versions is not None and after_versions is not None:
+            updated_extensions = [
+                (after_versions[key][0], before_versions[key][1], after_versions[key][1])
+                for key in before_versions.keys() & after_versions.keys()
+                if before_versions[key][1] != after_versions[key][1]
+            ]
+            if updated_extensions:
+                print(f"📦 {display_name} extensions updated ({len(updated_extensions)}):")
+                for extension_id, old_version, new_version in sorted(updated_extensions):
+                    print(f"  - {extension_id}: {old_version} -> {new_version}")
+            else:
+                print(f"ℹ️  No {display_name} extension updates found")
+        else:
+            success = False
+
+        if not update_success:
+            success = False
+    return success
+
 def run_dnf_services_check():
     command = ['dnf', 'needs-restarting', '-s']
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -790,7 +865,7 @@ def check_fedora_restart_needs(auto_yes=False, service_restart=False):
     try:
         subprocess.run(['dnf', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if dnf not available
+        return None  # Skip if dnf is not available
 
     print(f"\n{'='*50}")
     print("Running: Checking for restart requirements")
@@ -903,26 +978,26 @@ def refresh_snaps(): # Modified: Removed unused auto_yes parameter
     """Refresh snap packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
-        return True  # Skip silently on macOS
+        return None  # Skip on macOS
     
     # Check if snap is installed
     try:
         subprocess.run(['snap', '--version'], check=True, capture_output=True)
         return run_command(['sudo', 'snap', 'refresh'], "Refreshing snap packages")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if snap is not installed
 
 def update_flatpaks(): # Modified: Removed unused auto_yes parameter
     """Update Flatpak packages (Linux only)"""
     os_type = detect_os()
     if os_type == 'macos':
-        return True  # Skip silently on macOS
+        return None  # Skip on macOS
     
     # Check if flatpak is installed
     try:
         subprocess.run(['flatpak', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if Flatpak is not installed
     
     success = True
     
@@ -942,7 +1017,7 @@ def update_pip_packages(): # Modified: Removed unused auto_yes parameter
     try:
         subprocess.run(['pip3', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if pip3 is not installed
     
     success = True
     
@@ -1033,7 +1108,7 @@ def update_firmware(auto_yes=False, apply_firmware=False):
     """
     os_type = detect_os()
     if os_type == 'macos':
-        return True  # Skip silently on macOS
+        return None  # Skip on macOS
     
     # Check if fwupdmgr is installed
     try:
@@ -1042,7 +1117,7 @@ def update_firmware(auto_yes=False, apply_firmware=False):
         msg = "fwupdmgr not found or not installed. Install with: sudo apt install fwupd (Ubuntu) or sudo dnf install fwupd (Fedora)"
         print(f"⚠️  {msg}")
         failures.append(msg)
-        return True
+        return None
     
     # Refresh firmware metadata (normal refresh)
     print(f"\n{'='*50}")
@@ -1350,7 +1425,7 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
     
     if not compose_paths:
         print("ℹ️  No docker-compose directories configured, skipping")
-        return True
+        return None
     
     # Filter out invalid paths (container overlay paths, etc.)
     valid_paths = []
@@ -1371,9 +1446,10 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
     
     if not valid_paths:
         print("ℹ️  No valid docker-compose directories configured, skipping")
-        return True
+        return None
     
     overall_success = True
+    ran_compose_pull = False
     
     for path_str in valid_paths:
         compose_path = Path(path_str)
@@ -1424,6 +1500,7 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
                     pre_pull_digests[name] = digest
             except Exception as e:
                 print(f"⚠️  Could not snapshot pre-pull image digests: {e}")
+            ran_compose_pull = True
             process = subprocess.Popen(['docker-compose', 'pull'],
                                        stdout=subprocess.PIPE, 
                                        stderr=subprocess.PIPE, 
@@ -1603,7 +1680,7 @@ def docker_compose_pull(auto_yes=False): # Modified: Removed unused auto_yes par
             for image in dict.fromkeys(updated_images):  # deduplicate preserving order
                 print(f"  - {image}")
 
-    return overall_success
+    return overall_success if ran_compose_pull else None
 
 def docker_system_prune(auto_yes=False):
     """Run docker system prune to clean up unused resources"""
@@ -1611,7 +1688,7 @@ def docker_system_prune(auto_yes=False):
     try:
         subprocess.run(['docker', '--version'], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return True  # Skip silently if not installed
+        return None  # Skip if Docker is not installed
 
     try:
         docker_prefix = ['docker']
@@ -1739,6 +1816,7 @@ def interactive_configure(config, os_type):
 
     # Common options
     set_config_val('skip-os-updates', ask_bool('Skip OS updates by default?', config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False)))
+    set_config_val('skip-vscode', ask_bool('Skip VS Code extension updates by default?', config_get_bool(config, 'skip-vscode', 'skip_vscode', False)))
     set_config_val('skip-vim', ask_bool('Skip vim plugin updates by default?', config_get_bool(config, 'skip-vim', 'skip_vim', False)))
     set_config_val('skip-tmux', ask_bool('Skip tmux plugin updates (TPM) by default?', config_get_bool(config, 'skip-tmux', 'skip_tmux', False)))
     set_config_val('skip-pip', ask_bool('Skip pip package updates by default?', config_get_bool(config, 'skip-pip', 'skip_pip', False)))
@@ -1815,6 +1893,8 @@ Command-line flags override config when provided. Run `--help` to see platform-s
     # Common flags for all platforms (defaults pulled from config)
     parser.add_argument('--skip-os-updates', action='store_true', default=config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False),
                         help='Skip operating system updates (e.g., macOS softwareupdate, apt/dnf upgrade)')
+    parser.add_argument('--skip-vscode', action='store_true', default=config_get_bool(config, 'skip-vscode', 'skip_vscode', False),
+                        help='Skip Visual Studio Code extension updates')
     parser.add_argument('--skip-vim', action='store_true', default=config_get_bool(config, 'skip-vim', 'skip_vim', False),
                         help='Skip vim plugin updates')
     parser.add_argument('--skip-pip', action='store_true', default=config_get_bool(config, 'skip-pip', 'skip_pip', False),
@@ -1862,6 +1942,7 @@ Command-line flags override config when provided. Run `--help` to see platform-s
         # Compute effective config: start with defaults, override with config file, then CLI flags
         effective_config = {
             'skip_os_updates': config_get_bool(config, 'skip-os-updates', 'skip_os_updates', False),
+            'skip_vscode': config_get_bool(config, 'skip-vscode', 'skip_vscode', False),
             'skip_vim': config_get_bool(config, 'skip-vim', 'skip_vim', False),
             'skip_pip': config_get_bool(config, 'skip-pip', 'skip_pip', False),
             'skip_docker_pull': config_get_bool(config, 'skip-docker-pull', 'skip_docker_pull', False),
@@ -1895,6 +1976,19 @@ Command-line flags override config when provided. Run `--help` to see platform-s
 
     success_count = 0
     total_tasks = 0
+    skipped_tasks = []
+    disabled_tasks = []
+    completed_tasks = []
+
+    def record_task_result(task_name, result):
+        nonlocal success_count, total_tasks
+        if result is None:
+            skipped_tasks.append(task_name)
+            return
+        total_tasks += 1
+        if result:
+            success_count += 1
+            completed_tasks.append(task_name)
 
     if os_type == 'macos':
         # Define macOS tasks
@@ -1911,28 +2005,30 @@ Command-line flags override config when provided. Run `--help` to see platform-s
         ]
 
         for task, should_run, *task_args in macos_tasks:
+            task_name = task.__name__.replace('_', ' ')
             if should_run:
-                total_tasks += 1
-                if task(*task_args):
-                    success_count += 1
+                record_task_result(task_name, task(*task_args))
+            else:
+                disabled_tasks.append(task_name)
 
     elif os_type in ['omarchy', 'arch', 'ubuntu', 'fedora', 'rhel']:
         # System packages
-        if not args.skip_os_updates:
-            total_tasks += 1
+        if args.skip_os_updates:
+            disabled_tasks.append(f"{os_type} system package updates")
+        else:
             if os_type == 'omarchy':
-                if update_omarchy_packages(auto_yes):
-                    success_count += 1
+                record_task_result("Update Omarchy packages", update_omarchy_packages(auto_yes))
             elif os_type == 'arch':
-                if update_arch_packages(auto_yes):
-                    success_count += 1
+                record_task_result("Update Arch packages", update_arch_packages(auto_yes))
             elif os_type == 'ubuntu':
-                run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
-                if run_command(['sudo', 'apt', 'upgrade'], "Upgrading packages", auto_yes):
-                    success_count += 1
+                package_lists_updated = run_command(['sudo', 'apt', 'update'], "Updating package lists", auto_yes)
+                packages_upgraded = run_command(['sudo', 'apt', 'upgrade'], "Upgrading packages", auto_yes)
+                record_task_result("Update Ubuntu packages", package_lists_updated and packages_upgraded)
             elif os_type in ['fedora', 'rhel']:
-                if run_command(['sudo', 'dnf', 'upgrade'], f"Updating {os_type.capitalize()} packages", auto_yes):
-                    success_count += 1
+                record_task_result(
+                    f"Update {os_type.capitalize()} packages",
+                    run_command(['sudo', 'dnf', 'upgrade', '--refresh'], f"Updating {os_type.capitalize()} packages", auto_yes),
+                )
         # Other Linux tasks
         linux_tasks = [
             (refresh_snaps, not args.skip_snap), # Modified: Removed auto_yes
@@ -1944,12 +2040,19 @@ Command-line flags override config when provided. Run `--help` to see platform-s
             (update_firmware, not args.skip_firmware, auto_yes, args.apply_firmware),
         ]
         for task, should_run, *task_args in linux_tasks:
+            task_name = task.__name__.replace('_', ' ')
             if should_run:
-                total_tasks += 1
-                if task(*task_args):
-                    success_count += 1
+                record_task_result(task_name, task(*task_args))
+            else:
+                disabled_tasks.append(task_name)
     else:
         print(f"❌ Unsupported OS: {os_type}")
+
+    if os_type in ['macos', 'omarchy', 'arch', 'ubuntu', 'fedora', 'rhel']:
+        if args.skip_vscode:
+            disabled_tasks.append("VS Code extension updates")
+        else:
+            record_task_result("VS Code extension updates", update_vscode_extensions())
 
     # Docker operations (cross-platform)
     docker_available = False
@@ -1960,21 +2063,31 @@ Command-line flags override config when provided. Run `--help` to see platform-s
         pass
 
     if docker_available:
-        if not args.skip_docker_pull:
+        if args.skip_docker_pull:
+            disabled_tasks.append("Docker Compose pull")
+        else:
             compose_paths = setup_docker_compose_config(auto_yes)
             if compose_paths or load_config().get('docker_compose_enabled', False):
-                total_tasks += 1
-                if docker_compose_pull(auto_yes): # Modified: Passed auto_yes to docker_compose_pull
-                    success_count += 1
+                record_task_result("Docker Compose pull", docker_compose_pull(auto_yes))
+            else:
+                skipped_tasks.append("Docker Compose pull (not configured)")
         
+        if args.skip_docker_prune:
+            disabled_tasks.append("Docker system prune")
+        else:
+            record_task_result("Docker system prune", docker_system_prune(auto_yes))
+    else:
+        if not args.skip_docker_pull:
+            skipped_tasks.append("Docker Compose pull (Docker not installed)")
         if not args.skip_docker_prune:
-            total_tasks += 1
-            if docker_system_prune(auto_yes):
-                success_count += 1
+            skipped_tasks.append("Docker system prune (Docker not installed)")
 
     # Check for service restarts at the very end
     if os_type in ['fedora', 'rhel']:
-        check_fedora_restart_needs(auto_yes, service_restart=args.service_restart)
+        record_task_result(
+            "Check Fedora restart requirements",
+            check_fedora_restart_needs(auto_yes, service_restart=args.service_restart),
+        )
 
     # Pending actions summary
     if pending_actions:
@@ -1997,8 +2110,23 @@ Command-line flags override config when provided. Run `--help` to see platform-s
     print("📊 SUMMARY")
     print(f"{'='*50}")
     print(f"Tasks completed successfully: {success_count}/{total_tasks}")
-    
-    if success_count == total_tasks and not failures:
+    if completed_tasks:
+        print(f"Tasks completed ({len(completed_tasks)}):")
+        for task_name in completed_tasks:
+            print(f"  - {task_name}")
+    if skipped_tasks:
+        print(f"Tasks skipped (not installed or no work configured): {len(skipped_tasks)}")
+        for task_name in skipped_tasks:
+            print(f"  - {task_name}")
+    if disabled_tasks:
+        print(f"Tasks disabled by options: {len(disabled_tasks)}")
+        for task_name in disabled_tasks:
+            print(f"  - {task_name}")
+
+    if total_tasks == 0 and not failures:
+        print("ℹ️  No update tasks were run.")
+        sys.exit(0)
+    elif success_count == total_tasks and not failures:
         print("🎉 All tasks completed successfully!")
         sys.exit(0)
     else:
